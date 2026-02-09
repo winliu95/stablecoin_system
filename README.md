@@ -58,10 +58,9 @@ This system allows for the creation of a fiat-backed stablecoin (USDT) using var
   - Mint USDT.
   - Repay debt and withdraw collateral.
 
-## 📄 Documentation Artifacts
-Detailed planning and verification results can be found in:
-- `implementation_plan.md`
-- `walkthrough.md`
-- `task.md`
+## 📄 Documentation
 
-*(Note: These are currently in the hidden brain directory, I can copy them to root if needed).*
+Find detailed project documentation in the `docs/` directory:
+- [Implementation Plan](docs/implementation_plan.md) - Technical design and architecture.
+- [Walkthrough](docs/walkthrough.md) - Summary of achievements and verification results.
+- [Task List](docs/task.md) - Current development status and checklist.

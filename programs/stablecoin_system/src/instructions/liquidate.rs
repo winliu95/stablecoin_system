@@ -68,9 +68,21 @@ pub struct Liquidate<'info> {
     pub collateral_mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
+
+    #[account(
+        seeds = [b"global_state"],
+        bump = global_state.bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
 }
 
 pub fn handler(ctx: Context<Liquidate>, amount_to_repay: u64) -> Result<()> {
+    // 0. Governance Checks
+    let global_state = &ctx.accounts.global_state;
+    if global_state.paused {
+        return err!(CustomErrorCode::Paused);
+    }
+
     let position = &mut ctx.accounts.position;
     
     // 1. Check Solvency (Current CR < MCR ?)
@@ -87,7 +99,7 @@ pub fn handler(ctx: Context<Liquidate>, amount_to_repay: u64) -> Result<()> {
         
     // If Position is SAFE, revert
     if (collateral_val as u128) >= required_collateral_value {
-        return err!(ErrorCode::PositionSafe);
+        return err!(CustomErrorCode::PositionSafe);
     }
     
     // 2. Burn Liquidator's USDT
@@ -152,8 +164,4 @@ pub fn handler(ctx: Context<Liquidate>, amount_to_repay: u64) -> Result<()> {
     Ok(())
 }
 
-#[error_code]
-pub enum ErrorCode {
-    #[msg("Position is safe (CR >= MCR)")]
-    PositionSafe,
-}
+

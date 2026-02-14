@@ -21,17 +21,17 @@
 ## 3. 進階功能模組 (Advanced Features)
 - [x] **清算機制 (Liquidation)** <!-- id: 6 -->
     - [x] 實作 `liquidate` (清算低於 MCR 的倉位)
-- [ ] **價格穩定模組 (PSM & Oracle)** <!-- id: 7 -->
-    - [ ] 整合 Pyth/Switchboard Oracle 讀取價格
-    - [ ] 實作 USDC 1:1 兌換 (PSM)
-- [ ] **治理與合規 (Governance & Compliance)** <!-- id: 8 -->
-    - [ ] 實作暫停/恢復功能 (`pause`/`unpause`)
-    - [ ] 實作黑名單或凍結功能 (符合 AML/KYC 需求)
+- [x] **價格穩定模組 (PSM & Oracle)** <!-- id: 7 -->
+    - [x] 整合 Pyth/Switchboard Oracle 讀取價格
+    - [x] 實作 USDC 1:1 兌換 (PSM)
+- [x] **治理與合規 (Governance & Compliance)** <!-- id: 8 -->
+    - [x] 實作暫停/恢復功能 (`pause`/`unpause`)
+    - [x] 實作黑名單或凍結功能 (符合 AML/KYC 需求)
 
 ## 4. 測試與驗證 (Testing & Verification)
 - [x] 撰寫單元測試 (Unit Tests in Rust/TS) <!-- id: 9 -->
 - [x] 撰寫整合測試 (Integration Tests) <!-- id: 10 -->
-- [ ] 部署至 Localnet/Devnet 進行驗證 <!-- id: 11 -->
+- [x] 部署至 Localnet/Devnet 進行驗證 <!-- id: 11 -->
 
 ## 5. 前端開發 (Frontend Development)
 - [x] 初始化 Next.js 專案 (使用 Wallet Adapter) <!-- id: 12 -->

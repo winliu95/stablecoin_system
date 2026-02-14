@@ -33,9 +33,26 @@ pub struct BurnUsdt<'info> {
     pub collateral_mint: Account<'info, Mint>,
 
     pub token_program: Program<'info, Token>,
+
+    #[account(
+        seeds = [b"global_state"],
+        bump = global_state.bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
 }
 
 pub fn handler(ctx: Context<BurnUsdt>, amount: u64) -> Result<()> {
+    // 0. Governance Checks
+    let global_state = &ctx.accounts.global_state;
+    if global_state.paused {
+        return err!(CustomErrorCode::Paused);
+    }
+    
+    let position = &mut ctx.accounts.position;
+    if position.is_frozen {
+        return err!(CustomErrorCode::Frozen);
+    }
+
     // 1. Burn Tokens
     let cpi_accounts = Burn {
         mint: ctx.accounts.usdt_mint.to_account_info(),

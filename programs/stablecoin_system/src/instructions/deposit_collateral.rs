@@ -49,9 +49,25 @@ pub struct DepositCollateral<'info> {
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+    
+    #[account(
+        seeds = [b"global_state"],
+        bump = global_state.bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
 }
 
 pub fn handler(ctx: Context<DepositCollateral>, amount: u64) -> Result<()> {
+    // 0. Governance Checks
+    let global_state = &ctx.accounts.global_state;
+    if global_state.paused {
+        return err!(CustomErrorCode::Paused);
+    }
+    
+    let position = &mut ctx.accounts.position;
+    if position.is_frozen {
+        return err!(CustomErrorCode::Frozen);
+    }
     // 1. Transfer tokens from user to vault
     let cpi_accounts = Transfer {
         from: ctx.accounts.user_token_account.to_account_info(),
@@ -63,7 +79,7 @@ pub fn handler(ctx: Context<DepositCollateral>, amount: u64) -> Result<()> {
     token::transfer(cpi_ctx, amount)?;
 
     // 2. Update Position
-    let position = &mut ctx.accounts.position;
+    // let position = &mut ctx.accounts.position; // Already borrowed mutably above
     if position.owner == Pubkey::default() {
         position.owner = ctx.accounts.user.key();
         position.collateral_mint = ctx.accounts.collateral_mint.key();

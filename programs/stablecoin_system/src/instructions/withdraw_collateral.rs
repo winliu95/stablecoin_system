@@ -52,13 +52,28 @@ pub struct WithdrawCollateral<'info> {
     pub user_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
+
+    #[account(
+        seeds = [b"global_state"],
+        bump = global_state.bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
 }
 
 pub fn handler(ctx: Context<WithdrawCollateral>, amount: u64) -> Result<()> {
+    // 0. Governance Checks
+    let global_state = &ctx.accounts.global_state;
+    if global_state.paused {
+        return err!(CustomErrorCode::Paused);
+    }
+    
     let position = &mut ctx.accounts.position;
+    if position.is_frozen {
+        return err!(CustomErrorCode::Frozen);
+    }
 
     // 1. Calculate New Collateral Amount
-    let new_collateral_amount = position.collateral_amount.checked_sub(amount).ok_or(ErrorCode::InsufficientCollateral)?;
+    let new_collateral_amount = position.collateral_amount.checked_sub(amount).ok_or(CustomErrorCode::InsufficientCollateral)?;
 
     // 2. Check Solvency if Debt > 0
     if position.debt_amount > 0 {
@@ -74,7 +89,7 @@ pub fn handler(ctx: Context<WithdrawCollateral>, amount: u64) -> Result<()> {
             .checked_div(100).unwrap();
             
         if (collateral_val as u128) < required_collateral_value {
-            return err!(ErrorCode::BelowMCR);
+            return err!(CustomErrorCode::BelowMcr);
         }
     }
 
@@ -99,10 +114,4 @@ pub fn handler(ctx: Context<WithdrawCollateral>, amount: u64) -> Result<()> {
     Ok(())
 }
 
-#[error_code]
-pub enum ErrorCode {
-    #[msg("Insufficient collateral to withdraw")]
-    InsufficientCollateral,
-    #[msg("Withdrawal would put position below MCR")]
-    BelowMCR,
-}
+

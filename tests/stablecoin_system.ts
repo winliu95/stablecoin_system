@@ -233,4 +233,131 @@ describe("stablecoin_system", () => {
         console.log("Position Collateral after withdraw:", positionAccount.collateralAmount.toString());
         assert.ok(positionAccount.collateralAmount.eq(new anchor.BN(4900000000)));
     });
+
+    it("Governance: Pauses and Unpauses System", async () => {
+        // 1. Pause
+        await program.methods.togglePause(true).accounts({
+            globalState: globalState,
+            admin: provider.wallet.publicKey,
+        } as any).rpc();
+
+        const state = await program.account.globalState.fetch(globalState);
+        assert.ok(state.paused === true);
+
+        // 2. Try to deposit (should fail)
+        try {
+            const [position] = anchor.web3.PublicKey.findProgramAddressSync(
+                [Buffer.from("position"), userBody.publicKey.toBuffer(), collateralMint.toBuffer()],
+                program.programId
+            );
+            const [vault] = anchor.web3.PublicKey.findProgramAddressSync(
+                [Buffer.from("vault"), collateralMint.toBuffer()],
+                program.programId
+            );
+
+            await program.methods.depositCollateral(new anchor.BN(100)).accounts({
+                user: userBody.publicKey,
+                collateralMint: collateralMint,
+                userTokenAccount: userCollateralAccount,
+                vaultTokenAccount: vault,
+                position: position,
+                globalState: globalState, // Needed for check
+            } as any).signers([userBody]).rpc();
+            assert.fail("Should have failed due to Pause");
+        } catch (e) {
+            assert.ok(JSON.stringify(e).includes("Paused"));
+        }
+
+        // 3. Unpause
+        await program.methods.togglePause(false).accounts({
+            globalState: globalState,
+            admin: provider.wallet.publicKey,
+        } as any).rpc();
+
+        const stateUnpaused = await program.account.globalState.fetch(globalState);
+        assert.ok(stateUnpaused.paused === false);
+    });
+
+    it("PSM: Swaps USDC for USDT and back", async () => {
+        // 1. Create Mock USDC Mint
+        const usdcMint = await createMint(
+            provider.connection,
+            (provider.wallet as any).payer,
+            provider.wallet.publicKey,
+            null,
+            6
+        );
+
+        // 2. Configure PSM
+        const [psmConfig] = anchor.web3.PublicKey.findProgramAddressSync(
+            [Buffer.from("psm"), usdcMint.toBuffer()],
+            program.programId
+        );
+        const [psmVault] = anchor.web3.PublicKey.findProgramAddressSync(
+            [Buffer.from("psm_vault"), usdcMint.toBuffer()],
+            program.programId
+        );
+
+        await program.methods.configurePsm(new anchor.BN(0)).accounts({
+            admin: provider.wallet.publicKey,
+            globalState: globalState,
+            tokenMint: usdcMint,
+            psmConfig: psmConfig,
+            psmVault: psmVault,
+        } as any).rpc();
+
+        // 3. Mint USDC to User
+        const userUsdcAccount = await createAssociatedTokenAccount(
+            provider.connection,
+            (provider.wallet as any).payer,
+            usdcMint,
+            userBody.publicKey
+        );
+        await mintTo(
+            provider.connection,
+            (provider.wallet as any).payer,
+            usdcMint,
+            userUsdcAccount,
+            provider.wallet.publicKey,
+            1000 * 1_000_000 // 1000 USDC
+        );
+
+        // 4. Swap USDC -> USDT
+        const userUsdtAccount = await anchor.utils.token.associatedAddress({
+            mint: mintPda,
+            owner: userBody.publicKey
+        });
+
+        await program.methods.swapUsdcToUsdt(new anchor.BN(500 * 1_000_000)).accounts({
+            user: userBody.publicKey,
+            psmConfig: psmConfig,
+            tokenMint: usdcMint,
+            psmVault: psmVault,
+            userTokenAccount: userUsdcAccount,
+            usdtMint: mintPda,
+            userUsdtAccount: userUsdtAccount,
+            globalState: globalState,
+        } as any).signers([userBody]).rpc();
+
+        // Check balances not easily possible without connection fetch, but if it didn't fail it's good.
+        const psmConfigAccount = await program.account.psmConfig.fetch(psmConfig);
+        console.log("PSM Total Minted:", psmConfigAccount.totalMinted.toString());
+        assert.ok(psmConfigAccount.totalMinted.eq(new anchor.BN(500 * 1_000_000)));
+
+        // 5. Swap USDT -> USDC
+        await program.methods.swapUsdtToUsdc(new anchor.BN(500 * 1_000_000)).accounts({
+            user: userBody.publicKey,
+            psmConfig: psmConfig,
+            tokenMint: usdcMint,
+            psmVault: psmVault,
+            userTokenAccount: userUsdcAccount,
+            usdtMint: mintPda,
+            userUsdtAccount: userUsdtAccount,
+            globalState: globalState,
+        } as any).signers([userBody]).rpc();
+
+        const psmConfigAccountAfter = await program.account.psmConfig.fetch(psmConfig);
+        console.log("PSM Total Minted After Redeem:", psmConfigAccountAfter.totalMinted.toString());
+        assert.ok(psmConfigAccountAfter.totalMinted.eq(new anchor.BN(0)));
+    });
 });

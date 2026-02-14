@@ -8,6 +8,8 @@ pub mod mint_usdt;
 pub mod burn_usdt;
 pub mod withdraw_collateral;
 pub mod liquidate;
+pub mod governance;
+pub mod psm;
 
 
 

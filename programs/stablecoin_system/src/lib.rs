@@ -18,7 +18,11 @@ use instructions::deposit_collateral::*;
 use instructions::mint_usdt::*;
 use instructions::burn_usdt::*;
 use instructions::withdraw_collateral::*;
+use instructions::withdraw_collateral::*;
 use instructions::liquidate::*;
+use instructions::liquidate::*;
+use instructions::governance::*;
+use instructions::psm::*;
 use state::*;
 
 
@@ -66,6 +70,26 @@ pub mod stablecoin_system {
 
     pub fn liquidate(ctx: Context<Liquidate>, amount_to_repay: u64) -> Result<()> {
         instructions::liquidate::handler(ctx, amount_to_repay)
+    }
+
+    pub fn toggle_pause(ctx: Context<TogglePause>, paused: bool) -> Result<()> {
+        instructions::governance::handler_pause(ctx, paused)
+    }
+
+    pub fn toggle_freeze(ctx: Context<ToggleFreeze>, frozen: bool) -> Result<()> {
+        instructions::governance::handler_freeze(ctx, frozen)
+    }
+
+    pub fn configure_psm(ctx: Context<ConfigurePsm>, fee_bps: u64) -> Result<()> {
+        instructions::psm::handler_configure(ctx, fee_bps)
+    }
+
+    pub fn swap_usdc_to_usdt(ctx: Context<SwapUsdcToUsdt>, amount: u64) -> Result<()> {
+        instructions::psm::handler_swap_to_usdt(ctx, amount)
+    }
+
+    pub fn swap_usdt_to_usdc(ctx: Context<SwapUsdtToUsdc>, amount: u64) -> Result<()> {
+        instructions::psm::handler_swap_to_usdc(ctx, amount)
     }
 
 

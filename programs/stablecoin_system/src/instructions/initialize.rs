@@ -7,7 +7,7 @@ pub struct Initialize<'info> {
     #[account(
         init, 
         payer = admin, 
-        seeds = [b"global_state"], 
+        seeds = [b"global_state"],
         bump, 
         space = GlobalState::LEN
     )]

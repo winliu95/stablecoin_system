@@ -58,6 +58,17 @@ pub struct MintUsdt<'info> {
 }
 
 pub fn handler(ctx: Context<MintUsdt>, amount_to_mint: u64) -> Result<()> {
+    // 0. Governance Checks
+    let global_state = &ctx.accounts.global_state;
+    if global_state.paused {
+        return err!(CustomErrorCode::Paused);
+    }
+    
+    let position = &mut ctx.accounts.position;
+    if position.is_frozen {
+        return err!(CustomErrorCode::Frozen);
+    }
+
     // 1. Get Price
     let price = get_price(&ctx.accounts.oracle)?; // e.g. 150*10^6
     
@@ -86,7 +97,7 @@ pub fn handler(ctx: Context<MintUsdt>, amount_to_mint: u64) -> Result<()> {
         .checked_div(100).unwrap();
         
     if (collateral_val as u128) < required_collateral_value {
-        return err!(ErrorCode::BelowMCR);
+        return err!(CustomErrorCode::BelowMcr);
     }
     
     // 5. Mint
@@ -117,8 +128,4 @@ pub fn handler(ctx: Context<MintUsdt>, amount_to_mint: u64) -> Result<()> {
     Ok(())
 }
 
-#[error_code]
-pub enum ErrorCode {
-    #[msg("Collateral Ratio is below Minimum Collateral Ratio")]
-    BelowMCR,
-}
+

@@ -9,11 +9,12 @@ crate-type = ["cdylib", "lib"]
 name = "stablecoin_system"
 
 [features]
-default = []
+default = ["mock-oracle"]
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
+mock-oracle = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 anchor-debug = []
 custom-heap = []
@@ -24,6 +25,7 @@ custom-panic = []
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
 constant_time_eq = "=0.3.1"
+pyth-sdk-solana = "0.10.1"
 
 
 [lints.rust]

@@ -414,7 +414,12 @@ pub struct SwapUsdcToUsdt<'info> {
     pub user_token_account: Account<'info, TokenAccount>,
     #[account(mut, seeds = [b"mint"], bump)]
     pub usdt_mint: Account<'info, Mint>,
-    #[account(mut, associated_token::mint = usdt_mint, associated_token::authority = user)]
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = usdt_mint,
+        associated_token::authority = user
+    )]
     pub user_usdt_account: Account<'info, TokenAccount>,
     #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
@@ -431,7 +436,12 @@ pub struct SwapUsdtToUsdc<'info> {
     pub token_mint: Account<'info, Mint>,
     #[account(mut, seeds = [b"psm_vault", token_mint.key().as_ref()], bump)]
     pub psm_vault: Account<'info, TokenAccount>,
-    #[account(mut, associated_token::mint = token_mint, associated_token::authority = user)]
+    #[account(
+        init_if_needed,
+        payer = user,
+        associated_token::mint = token_mint,
+        associated_token::authority = user
+    )]
     pub user_token_account: Account<'info, TokenAccount>,
     #[account(mut, seeds = [b"mint"], bump)]
     pub usdt_mint: Account<'info, Mint>,

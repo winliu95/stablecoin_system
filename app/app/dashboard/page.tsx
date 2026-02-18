@@ -113,8 +113,16 @@ export default function SwapPage() {
             }
             fetchData();
         } catch (e: any) {
-            console.error(e);
-            setStatus(`Swap failed: ${e.message}`);
+            console.error("Swap Error:", e);
+            if (e.logs) console.log("Transaction Logs:", e.logs);
+
+            let errMsg = e.message || e.toString();
+            if (errMsg.includes("Attempt to debit an account")) {
+                errMsg = "Insufficient SOL for transaction fee. Please airdrop SOL to your wallet on the Admin page!";
+            } else if (e.logs) {
+                errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
+            }
+            setStatus(`Swap failed: ${errMsg}`);
         }
     };
 

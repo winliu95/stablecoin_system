@@ -250,8 +250,16 @@ export default function AdminPage() {
             setStatus("PSM Configured Successfully! Tx: " + tx);
 
         } catch (e: any) {
-            console.error(e);
-            setStatus("Error configuring PSM: " + e.message);
+            console.error("PSM Config Error:", e);
+            if (e.logs) console.log("Transaction Logs:", e.logs);
+
+            let errMsg = e.message || e.toString();
+            if (errMsg.includes("Attempt to debit an account")) {
+                errMsg = "Insufficient SOL setup. Please click 'Get Devnet SOL' first!";
+            } else if (e.logs) {
+                errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
+            }
+            setStatus("Error: " + errMsg);
         }
     };
 

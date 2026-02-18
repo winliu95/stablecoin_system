@@ -206,6 +206,55 @@ export default function AdminPage() {
         }
     };
 
+    // PSM State
+    const [psmMint, setPsmMint] = useState("");
+    const [psmFee, setPsmFee] = useState("10"); // 0.1%
+
+    const configurePsm = async () => {
+        const program = getProgram();
+        if (!program || !wallet.publicKey) {
+            setStatus("Wallet not connected");
+            return;
+        }
+
+        try {
+            setStatus("Configuring PSM...");
+            const tokenMintPubkey = new PublicKey(psmMint);
+
+            // Derive PDAs
+            const [psmConfig] = PublicKey.findProgramAddressSync(
+                [Buffer.from("psm"), tokenMintPubkey.toBuffer()],
+                program.programId
+            );
+            const [psmVault] = PublicKey.findProgramAddressSync(
+                [Buffer.from("psm_vault"), tokenMintPubkey.toBuffer()],
+                program.programId
+            );
+            const [globalState] = PublicKey.findProgramAddressSync(
+                [Buffer.from("global_state")],
+                program.programId
+            );
+
+            const tx = await program.methods.configurePsm(
+                new BN(psmFee)
+            ).accounts({
+                admin: wallet.publicKey,
+                globalState: globalState,
+                tokenMint: tokenMintPubkey,
+                psmConfig: psmConfig,
+                psmVault: psmVault,
+                tokenProgram: TOKEN_PROGRAM_ID,
+                systemProgram: SystemProgram.programId,
+            } as any).rpc();
+
+            setStatus("PSM Configured Successfully! Tx: " + tx);
+
+        } catch (e: any) {
+            console.error(e);
+            setStatus("Error configuring PSM: " + e.message);
+        }
+    };
+
     const configureCollateral = async () => {
         const program = getProgram();
         if (!program || !wallet.publicKey) {
@@ -363,6 +412,53 @@ export default function AdminPage() {
                             className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition"
                         >
                             Create Mock Token
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="w-full max-w-2xl bg-slate-800 p-8 rounded-xl shadow-lg mt-8">
+                <h2 className="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">3. Configure PSM (Peg Stability Module)</h2>
+                <div className="flex flex-col gap-4">
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Stablecoin Asset Mint (e.g. USDC)</label>
+                        <input
+                            type="text"
+                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                            placeholder="Enter USDC Mint Address"
+                            value={psmMint}
+                            onChange={(e) => setPsmMint(e.target.value)}
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium mb-1">Swap Fee (Basis Points)</label>
+                        <input
+                            type="number"
+                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                            placeholder="e.g. 10 for 0.1%"
+                            value={psmFee}
+                            onChange={(e) => setPsmFee(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-400 mt-1">10 bps = 0.1% fee</p>
+                    </div>
+
+                    <div className="flex gap-4 mt-2">
+                        <button
+                            onClick={configurePsm}
+                            className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded transition"
+                        >
+                            Initialize PSM
+                        </button>
+                        <button
+                            onClick={async () => {
+                                await createMockCollateral();
+                                // Manual delay or check if collateralMint is updated
+                                setPsmMint(collateralMint);
+                            }}
+                            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition"
+                        >
+                            Create Mock USDC
                         </button>
                     </div>
                 </div>

@@ -42,6 +42,15 @@ impl Position {
     pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 1 + 8 + 1;
 }
 
+#[account]
+pub struct MockPriceAccount {
+    pub price: u64,
+}
+
+impl MockPriceAccount {
+    pub const LEN: usize = 8 + 8;
+}
+
 #[error_code]
 pub enum CustomErrorCode {
     #[msg("The system is currently paused.")]

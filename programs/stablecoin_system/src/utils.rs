@@ -2,11 +2,20 @@ use anchor_lang::prelude::*;
 
 use pyth_sdk_solana::load_price_feed_from_account_info;
 use crate::state::CustomErrorCode;
+use crate::state::MockPriceAccount;
 
 pub fn get_price(oracle: &AccountInfo) -> Result<u64> {
     #[cfg(feature = "mock-oracle")]
     {
-        msg!("Using Mock Oracle Price: $150.00");
+        // Try to read dynamic mock price from account manually to avoid lifetime issues
+        if let Ok(mut data) = oracle.try_borrow_data() {
+            if let Ok(mock_price_acc) = MockPriceAccount::try_deserialize(&mut &data[..]) {
+                msg!("Using Dynamic Mock Oracle Price: ${}", mock_price_acc.price as f64 / 1_000_000.0);
+                return Ok(mock_price_acc.price);
+            }
+        }
+        
+        msg!("Using Default Mock Oracle Price: $150.00");
         return Ok(150_000_000);
     }
 

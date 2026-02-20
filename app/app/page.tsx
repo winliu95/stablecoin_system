@@ -1,51 +1,70 @@
+"use client";
+
+import Link from "next/link";
 import { AppWalletMultiButton } from "../components/AppWalletMultiButton";
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24 bg-slate-900 text-white">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Solana Stablecoin System
+    <main className="flex min-h-screen flex-col items-center justify-center p-24 bg-slate-900 text-white">
+      <div className="text-center space-y-8 max-w-3xl">
+        <h1 className="text-6xl font-extrabold bg-gradient-to-r from-teal-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+          Solana Compliant Stablecoin
+        </h1>
+        <p className="text-xl text-slate-400">
+          The ultimate platform for remittances and decentralized credit.
+          Choose your module to get started.
         </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
+
+        <div className="flex justify-center pt-4">
           <AppWalletMultiButton />
         </div>
-      </div>
 
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-full sm:before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-to-br before:from-transparent before:to-blue-700 before:opacity-10 before:blur-2xl after:absolute after:-z-20 after:h-[180px] after:w-full sm:after:w-[240px] after:translate-x-1/3 after:bg-gradient-to-conic after:from-sky-900 after:via-blue-800 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <h1 className="text-4xl font-bold">Stablecoin Dashboard</h1>
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-12">
+          <Link
+            href="/swap"
+            className="group relative bg-slate-800 p-8 rounded-3xl border border-slate-700 hover:border-teal-500 transition-all hover:shadow-2xl hover:shadow-teal-500/10"
+          >
+            <div className="absolute top-4 right-4 text-teal-500 opacity-0 group-hover:opacity-100 transition-opacity">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold mb-3 text-teal-400">Swap (PSM)</h2>
+            <p className="text-slate-400 text-sm">
+              Instantly exchange USDC for our regulated USDT with a 1:1 peg and minimal fees. Best for remittances.
+            </p>
+          </Link>
 
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="/admin"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Admin{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Initialize and Configure System.
-          </p>
-        </a>
+          <Link
+            href="/loan"
+            className="group relative bg-slate-800 p-8 rounded-3xl border border-slate-700 hover:border-purple-500 transition-all hover:shadow-2xl hover:shadow-purple-500/10"
+          >
+            <div className="absolute top-4 right-4 text-purple-500 opacity-0 group-hover:opacity-100 transition-opacity">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold mb-3 text-purple-400">Loan (CDP)</h2>
+            <p className="text-slate-400 text-sm">
+              Deposit collateral assets to mint USDT. Manage your risk, monitor health ratios, and access credit.
+            </p>
+          </Link>
 
-        <a
-          href="/dashboard"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Dashboard{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Manage Collateral and Mint USDT.
-          </p>
-        </a>
+          <Link
+            href="/remit"
+            className="group relative bg-slate-800 p-8 rounded-3xl border border-slate-700 hover:border-orange-500 transition-all hover:shadow-2xl hover:shadow-orange-500/10 md:col-span-2"
+          >
+            <div className="absolute top-4 right-4 text-orange-500 opacity-0 group-hover:opacity-100 transition-opacity">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold mb-3 text-orange-400">Remit Wizard</h2>
+            <p className="text-slate-400 text-sm">
+              Step-by-step cross-border remittance simulation. Taiwan TWD to USA USD in minutes.
+            </p>
+          </Link>
+        </div>
       </div>
     </main>
   );

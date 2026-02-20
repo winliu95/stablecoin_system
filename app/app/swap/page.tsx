@@ -15,7 +15,7 @@ export default function SwapPage() {
     const [status, setStatus] = useState("");
 
     // PSM Data
-    const [usdcMint, setUsdcMint] = useState(""); // User should input the USDC mint address configured in Admin
+    const [usdcMint, setUsdcMint] = useState("");
     const [usdcBalance, setUsdcBalance] = useState("0");
     const [usdtBalance, setUsdtBalance] = useState("0");
     const [psmConfig, setPsmConfig] = useState<any>(null);
@@ -79,6 +79,7 @@ export default function SwapPage() {
             const [globalState] = PublicKey.findProgramAddressSync([Buffer.from("global_state")], program.programId);
             const [psmVault] = PublicKey.findProgramAddressSync([Buffer.from("psm_vault"), usdcMintPubkey.toBuffer()], program.programId);
             const [psmConfigPda] = PublicKey.findProgramAddressSync([Buffer.from("psm"), usdcMintPubkey.toBuffer()], program.programId);
+            const [psmAuthority] = PublicKey.findProgramAddressSync([Buffer.from("psm_authority")], program.programId);
 
             if (direction === "USDC_TO_USDT") {
                 setStatus("Swapping USDC to USDT...");
@@ -89,6 +90,7 @@ export default function SwapPage() {
                         tokenMint: usdcMintPubkey,
                         psmVault: psmVault,
                         usdtMint: usdtMint,
+                        psmAuthority: psmAuthority,
                         globalState: globalState,
                         tokenProgram: TOKEN_PROGRAM_ID,
                         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -104,6 +106,7 @@ export default function SwapPage() {
                         tokenMint: usdcMintPubkey,
                         psmVault: psmVault,
                         usdtMint: usdtMint,
+                        psmAuthority: psmAuthority,
                         globalState: globalState,
                         tokenProgram: TOKEN_PROGRAM_ID,
                         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -115,10 +118,11 @@ export default function SwapPage() {
         } catch (e: any) {
             console.error("Swap Error:", e);
             if (e.logs) console.log("Transaction Logs:", e.logs);
-
             let errMsg = e.message || e.toString();
             if (errMsg.includes("Attempt to debit an account")) {
-                errMsg = "Insufficient SOL for transaction fee. Please airdrop SOL to your wallet on the Admin page!";
+                errMsg = "Insufficient SOL fee. Please click 'Get Devnet SOL' on the Admin page!";
+            } else if (errMsg.includes("AccountNotInitialized")) {
+                errMsg = "PSM is not configured for this token. Please go to Admin page and 'Configure PSM' first!";
             } else if (e.logs) {
                 errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
             }
@@ -128,7 +132,7 @@ export default function SwapPage() {
 
     return (
         <main className="flex min-h-screen flex-col items-center p-24 bg-slate-900 text-white">
-            <div className="w-full max-lg mb-12 flex justify-between items-center">
+            <div className="w-full max-w-lg mb-12 flex justify-between items-center">
                 <h1 className="text-3xl font-bold bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">
                     Stablecoin Swap (PSM)
                 </h1>
@@ -136,7 +140,6 @@ export default function SwapPage() {
             </div>
 
             <div className="w-full max-w-md bg-slate-800 rounded-3xl p-8 shadow-2xl border border-slate-700">
-                {/* Configuration / USDC Mint Input */}
                 <div className="mb-6">
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                         USDC Mint Address
@@ -150,7 +153,6 @@ export default function SwapPage() {
                     />
                 </div>
 
-                {/* Balances */}
                 <div className="grid grid-cols-2 gap-4 mb-8">
                     <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50">
                         <p className="text-xs text-slate-500 mb-1">Your USDC</p>
@@ -162,7 +164,6 @@ export default function SwapPage() {
                     </div>
                 </div>
 
-                {/* Swap UI */}
                 <div className="space-y-4">
                     <div className="relative bg-slate-900 p-4 rounded-2xl border border-slate-700">
                         <p className="text-xs text-slate-500 mb-2">{direction === "USDC_TO_USDT" ? "From USDC" : "From USDT"}</p>
@@ -205,7 +206,6 @@ export default function SwapPage() {
                     </button>
                 </div>
 
-                {/* Fee Info */}
                 {psmConfig && (
                     <div className="mt-6 p-4 bg-teal-500/5 rounded-xl border border-teal-500/10 text-center">
                         <p className="text-xs text-teal-400">

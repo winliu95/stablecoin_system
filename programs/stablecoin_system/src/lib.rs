@@ -63,7 +63,6 @@ pub struct ConfigureCollateral<'info> {
     pub collateral_config: Account<'info, CollateralConfig>,
 
     #[account(
-        has_one = admin,
         seeds = [b"global_state"],
         bump = global_state.bump
     )]
@@ -362,13 +361,13 @@ pub fn liquidate_handler(ctx: Context<Liquidate>, amount: u64) -> Result<()> {
 // --- Governance ---
 #[derive(Accounts)]
 pub struct TogglePause<'info> {
-    #[account(mut, seeds = [b"global_state"], bump = global_state.bump, has_one = admin)]
+    #[account(mut, seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
     pub admin: Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct ToggleFreeze<'info> {
-    #[account(seeds = [b"global_state"], bump = global_state.bump, has_one = admin)]
+    #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
     #[account(mut)]
     pub position: Account<'info, Position>,
@@ -388,13 +387,16 @@ pub fn toggle_freeze_handler(ctx: Context<ToggleFreeze>, frozen: bool) -> Result
 pub struct ConfigurePsm<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
-    #[account(seeds = [b"global_state"], bump = global_state.bump, has_one = admin)]
+    #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
     pub token_mint: Account<'info, Mint>,
     #[account(init, payer = admin, seeds = [b"psm", token_mint.key().as_ref()], bump, space = 8 + 32 + 32 + 8 + 8 + 1)]
     pub psm_config: Account<'info, PsmConfig>,
-    #[account(init, payer = admin, seeds = [b"psm_vault", token_mint.key().as_ref()], bump, token::mint = token_mint, token::authority = global_state)]
+    #[account(init, payer = admin, seeds = [b"psm_vault", token_mint.key().as_ref()], bump, token::mint = token_mint, token::authority = psm_authority)]
     pub psm_vault: Account<'info, TokenAccount>,
+    /// CHECK: Dedicated authority for PSM vaults
+    #[account(seeds = [b"psm_authority"], bump)]
+    pub psm_authority: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
@@ -423,6 +425,9 @@ pub struct SwapUsdcToUsdt<'info> {
     pub user_usdt_account: Account<'info, TokenAccount>,
     #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
+    /// CHECK: PSM Authority
+    #[account(seeds = [b"psm_authority"], bump)]
+    pub psm_authority: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -449,6 +454,9 @@ pub struct SwapUsdtToUsdc<'info> {
     pub user_usdt_account: Account<'info, TokenAccount>,
     #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
+    /// CHECK: PSM Authority
+    #[account(seeds = [b"psm_authority"], bump)]
+    pub psm_authority: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -466,8 +474,9 @@ pub fn swap_to_usdt_handler(ctx: Context<SwapUsdcToUsdt>, amount: u64) -> Result
 pub fn swap_to_usdc_handler(ctx: Context<SwapUsdtToUsdc>, amount: u64) -> Result<()> {
     if ctx.accounts.global_state.paused { return err!(CustomErrorCode::Paused); }
     token::burn(CpiContext::new(ctx.accounts.token_program.to_account_info(), Burn { mint: ctx.accounts.usdt_mint.to_account_info(), from: ctx.accounts.user_usdt_account.to_account_info(), authority: ctx.accounts.user.to_account_info() }), amount)?;
-    let seeds = &[b"global_state".as_ref(), &[ctx.accounts.global_state.bump]];
-    token::transfer(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer { from: ctx.accounts.psm_vault.to_account_info(), to: ctx.accounts.user_token_account.to_account_info(), authority: ctx.accounts.global_state.to_account_info() }, &[&seeds[..]]), amount)?;
+    
+    let seeds = &[b"psm_authority".as_ref(), &[ctx.bumps.psm_authority]];
+    token::transfer(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer { from: ctx.accounts.psm_vault.to_account_info(), to: ctx.accounts.user_token_account.to_account_info(), authority: ctx.accounts.psm_authority.to_account_info() }, &[&seeds[..]]), amount)?;
     ctx.accounts.psm_config.total_minted -= amount; Ok(())
 }
 

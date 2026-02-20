@@ -267,10 +267,7 @@
         {
           "name": "admin",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "global_state"
-          ]
+          "signer": true
         },
         {
           "name": "system_program",
@@ -316,10 +313,7 @@
         {
           "name": "admin",
           "writable": true,
-          "signer": true,
-          "relations": [
-            "global_state"
-          ]
+          "signer": true
         },
         {
           "name": "global_state",
@@ -390,6 +384,31 @@
               {
                 "kind": "account",
                 "path": "token_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "psm_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  115,
+                  109,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
               }
             ]
           }
@@ -1686,6 +1705,31 @@
           }
         },
         {
+          "name": "psm_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  115,
+                  109,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1994,6 +2038,31 @@
           }
         },
         {
+          "name": "psm_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  115,
+                  109,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -2056,10 +2125,7 @@
         },
         {
           "name": "admin",
-          "signer": true,
-          "relations": [
-            "global_state"
-          ]
+          "signer": true
         }
       ],
       "args": [
@@ -2109,10 +2175,7 @@
         },
         {
           "name": "admin",
-          "signer": true,
-          "relations": [
-            "global_state"
-          ]
+          "signer": true
         }
       ],
       "args": [

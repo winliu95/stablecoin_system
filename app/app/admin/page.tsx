@@ -1,260 +1,53 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAnchorProgram } from "../../hooks/useAnchorProgram";
 import { AppWalletMultiButton } from "../../components/AppWalletMultiButton";
-import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, Keypair, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
-import {
-    createMint,
-    createAssociatedTokenAccount,
-    mintTo,
-    TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID
-} from "@solana/spl-token";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-
+import {
+    TOKEN_PROGRAM_ID,
+    MINT_SIZE,
+    createInitializeMintInstruction,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction,
+    createMintToInstruction
+} from "@solana/spl-token";
 
 export default function AdminPage() {
-    const { getProgram, programId } = useAnchorProgram();
+    const { getProgram } = useAnchorProgram();
     const { connection } = useConnection();
     const wallet = useWallet();
     const [status, setStatus] = useState("");
 
-    // Initialize State
-    const [isInitialized, setIsInitialized] = useState(false);
-
-    // Configure State
-    const [collateralMint, setCollateralMint] = useState("");
-    const [oracle, setOracle] = useState("");
-    const [mcr, setMcr] = useState("150");
-    const [ltr, setLtr] = useState("120");
-    const [penalty, setPenalty] = useState("10");
-
-    // Check if already initialized
-    useEffect(() => {
-        const checkInitialization = async () => {
-            const program = getProgram();
-            if (!program) return;
-
-            try {
-                const [globalStatePda] = PublicKey.findProgramAddressSync(
-                    [Buffer.from("global_state")],
-                    program.programId
-                );
-
-                // Cast to any to avoid TS error with raw IDL
-                const account = await (program.account as any).globalState.fetchNullable(globalStatePda);
-                if (account) {
-                    setIsInitialized(true);
-                    setStatus("System already initialized.");
-                }
-            } catch (e: any) {
-                console.log("Error checking init status:", e);
-            }
-        };
-
-        checkInitialization();
-    }, [wallet.publicKey]);
-
+    // Initialize System
     const initialize = async () => {
-        if (isInitialized) {
-            setStatus("System already initialized.");
-            return;
-        }
-
         const program = getProgram();
-        if (!program || !wallet.publicKey) {
-            setStatus("Wallet not connected");
-            return;
-        }
+        if (!program || !wallet.publicKey) return;
 
         try {
-            setStatus("Initializing...");
-            // Derive PDAs
-            const [globalState] = PublicKey.findProgramAddressSync(
-                [Buffer.from("global_state")],
-                program.programId
-            );
+            setStatus("Initializing System...");
+            const [globalState] = PublicKey.findProgramAddressSync([Buffer.from("global_state")], program.programId);
+            const [usdtMint] = PublicKey.findProgramAddressSync([Buffer.from("mint")], program.programId);
 
             const tx = await program.methods.initialize()
                 .accounts({
-                    // admin inferred from wallet
-                } as any)
-                .rpc();
+                    admin: wallet.publicKey,
+                    globalState: globalState,
+                    usdtMint: usdtMint,
+                    systemProgram: SystemProgram.programId,
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                } as any).rpc();
 
-            console.log("Initialize tx:", tx);
-            setStatus("Initialized successfully! Tx: " + tx);
-            setIsInitialized(true);
+            setStatus("System Initialized! Tx: " + tx);
         } catch (e: any) {
-            console.error(e);
-            if (e.message.includes("already in use") || e.toString().includes("0x0")) {
-                setStatus("System was already initialized. You can proceed.");
-                setIsInitialized(true);
-            } else {
-                setStatus("Error: " + e.message);
-            }
-        }
-    };
-
-    const createMockCollateral = async () => {
-        if (!wallet.publicKey || !wallet.signTransaction) {
-            setStatus("Connect wallet first");
-            return;
-        }
-
-        try {
-            setStatus("Creating mock collateral mint...");
-
-            const mintKeypair = Keypair.generate();
-            const mint = mintKeypair.publicKey;
-            console.log("New Mint:", mint.toBase58());
-
-            const balance = await connection.getBalance(wallet.publicKey);
-            if (balance < 0.1 * 10 ** 9) {
-                setStatus("Insufficient SOL. Please request airdrop first.");
-                return;
-            }
-
-            // Dynamic import to get helpers
-            const {
-                createInitializeMintInstruction,
-                createAssociatedTokenAccountInstruction,
-                createMintToInstruction,
-                getAssociatedTokenAddressSync,
-                MINT_SIZE
-            } = await import("@solana/spl-token");
-
-            const { Transaction } = await import("@solana/web3.js");
-
-            const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
-            const transaction = new Transaction();
-
-            // 1. Create Mint Account
-            transaction.add(
-                SystemProgram.createAccount({
-                    fromPubkey: wallet.publicKey,
-                    newAccountPubkey: mint,
-                    space: MINT_SIZE,
-                    lamports,
-                    programId: TOKEN_PROGRAM_ID,
-                })
-            );
-
-            // 2. Initialize Mint
-            transaction.add(
-                createInitializeMintInstruction(
-                    mint,
-                    6,
-                    wallet.publicKey,
-                    wallet.publicKey,
-                    TOKEN_PROGRAM_ID
-                )
-            );
-
-            // 3. Create Associated Token Account
-            const userAta = getAssociatedTokenAddressSync(
-                mint,
-                wallet.publicKey,
-                false,
-                TOKEN_PROGRAM_ID,
-                ASSOCIATED_TOKEN_PROGRAM_ID
-            );
-
-            transaction.add(
-                createAssociatedTokenAccountInstruction(
-                    wallet.publicKey,
-                    userAta,
-                    wallet.publicKey,
-                    mint,
-                    TOKEN_PROGRAM_ID,
-                    ASSOCIATED_TOKEN_PROGRAM_ID
-                )
-            );
-
-            // 4. Mint Tokens
-            transaction.add(
-                createMintToInstruction(
-                    mint,
-                    userAta,
-                    wallet.publicKey,
-                    1000 * 10 ** 6, // 1000 tokens
-                    [],
-                    TOKEN_PROGRAM_ID
-                )
-            );
-
-            transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-            transaction.feePayer = wallet.publicKey;
-
-            // Partial sign with Mint Keypair (required because we are creating it)
-            transaction.partialSign(mintKeypair);
-
-            // Sign with Wallet
-            const signedTx = await wallet.signTransaction(transaction);
-            const signature = await connection.sendRawTransaction(signedTx.serialize());
-
-            setStatus("Confirming transaction...");
-            await connection.confirmTransaction(signature, "confirmed");
-
-            setStatus(`Mock Token Created! Mint: ${mint.toBase58()}`);
-            setCollateralMint(mint.toBase58()); // Auto-fill input
-
-        } catch (e: any) {
-            console.error(e);
-            setStatus("Error: " + e.message);
-        }
-    };
-
-    // PSM State
-    const [psmMint, setPsmMint] = useState("");
-    const [psmFee, setPsmFee] = useState("10"); // 0.1%
-
-    const configurePsm = async () => {
-        const program = getProgram();
-        if (!program || !wallet.publicKey) {
-            setStatus("Wallet not connected");
-            return;
-        }
-
-        try {
-            setStatus("Configuring PSM...");
-            const tokenMintPubkey = new PublicKey(psmMint);
-
-            // Derive PDAs
-            const [psmConfig] = PublicKey.findProgramAddressSync(
-                [Buffer.from("psm"), tokenMintPubkey.toBuffer()],
-                program.programId
-            );
-            const [psmVault] = PublicKey.findProgramAddressSync(
-                [Buffer.from("psm_vault"), tokenMintPubkey.toBuffer()],
-                program.programId
-            );
-            const [globalState] = PublicKey.findProgramAddressSync(
-                [Buffer.from("global_state")],
-                program.programId
-            );
-
-            const tx = await program.methods.configurePsm(
-                new BN(psmFee)
-            ).accounts({
-                admin: wallet.publicKey,
-                globalState: globalState,
-                tokenMint: tokenMintPubkey,
-                psmConfig: psmConfig,
-                psmVault: psmVault,
-                tokenProgram: TOKEN_PROGRAM_ID,
-                systemProgram: SystemProgram.programId,
-            } as any).rpc();
-
-            setStatus("PSM Configured Successfully! Tx: " + tx);
-
-        } catch (e: any) {
-            console.error("PSM Config Error:", e);
+            console.error("Admin Action Error:", e);
             if (e.logs) console.log("Transaction Logs:", e.logs);
-
             let errMsg = e.message || e.toString();
-            if (errMsg.includes("Attempt to debit an account")) {
+            if (errMsg.includes("already in use")) {
+                errMsg = "System is already initialized! You can skip this step.";
+            } else if (errMsg.includes("Attempt to debit an account")) {
                 errMsg = "Insufficient SOL setup. Please click 'Get Devnet SOL' first!";
             } else if (e.logs) {
                 errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
@@ -263,221 +56,346 @@ export default function AdminPage() {
         }
     };
 
+    // Configure Collateral
+    const [collateralMint, setCollateralMint] = useState("");
+    const [oracle, setOracle] = useState("");
+    const [mcr, setMcr] = useState("150");
+    const [ltr, setLtr] = useState("120");
+    const [penalty, setPenalty] = useState("10");
+
     const configureCollateral = async () => {
         const program = getProgram();
-        if (!program || !wallet.publicKey) {
-            setStatus("Wallet not connected");
-            return;
-        }
+        if (!program || !wallet.publicKey) return;
 
         try {
             setStatus("Configuring Collateral...");
-            const collateralMintPubkey = new PublicKey(collateralMint);
-            let oraclePubkey: PublicKey;
-
-            if (!oracle) {
-                // Mock oracle if empty
-                oraclePubkey = Keypair.generate().publicKey;
-                setStatus(`Using mock oracle: ${oraclePubkey.toBase58()}`);
-            } else {
-                oraclePubkey = new PublicKey(oracle);
-            }
-
-            const [collateralConfig] = PublicKey.findProgramAddressSync(
-                [Buffer.from("collateral"), collateralMintPubkey.toBuffer()],
-                program.programId
-            );
+            const mintPubkey = new PublicKey(collateralMint);
+            const oraclePubkey = oracle ? new PublicKey(oracle) : wallet.publicKey; // Mock oracle as admin
 
             const tx = await program.methods.configureCollateral(
-                collateralMintPubkey,
-                oraclePubkey,
-                new BN(mcr),
-                new BN(ltr),
-                new BN(penalty)
+                new BN(parseInt(mcr)),
+                new BN(parseInt(ltr)),
+                new BN(parseInt(penalty))
             ).accounts({
-                collateralConfig: collateralConfig,
                 admin: wallet.publicKey,
-                // others inferred
+                collateralMint: mintPubkey,
+                oracle: oraclePubkey,
             } as any).rpc();
 
-            setStatus("Configuration Success! Tx: " + tx);
-
+            setStatus("Collateral Configured! Tx: " + tx);
         } catch (e: any) {
-            console.error(e);
-            setStatus("Error: " + e.message);
+            console.error("Admin Action Error:", e);
+            if (e.logs) console.log("Transaction Logs:", e.logs);
+            let errMsg = e.message || e.toString();
+            if (errMsg.includes("already in use")) {
+                errMsg = "System is already initialized! You can skip this step.";
+            } else if (errMsg.includes("Attempt to debit an account")) {
+                errMsg = "Insufficient SOL setup. Please click 'Get Devnet SOL' first!";
+            } else if (e.logs) {
+                errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
+            }
+            setStatus("Error: " + errMsg);
         }
     };
 
-    const requestAirdrop = async () => {
-        if (!wallet.publicKey) {
-            setStatus("Connect wallet first");
+    // Configure PSM
+    const [psmMint, setPsmMint] = useState("");
+    const [psmFee, setPsmFee] = useState("10"); // 0.1%
+
+    const configurePsm = async () => {
+        const program = getProgram();
+        if (!program || !wallet.publicKey) return;
+
+        try {
+            setStatus("Configuring PSM...");
+            if (!psmMint) {
+                setStatus("Please enter/select a USDC Mint Address first!");
+                return;
+            }
+
+            const mintPubkey = new PublicKey(psmMint);
+            const feeBN = new BN(parseInt(psmFee));
+
+            const [globalState] = PublicKey.findProgramAddressSync([Buffer.from("global_state")], program.programId);
+            const [psmConfigPda] = PublicKey.findProgramAddressSync([Buffer.from("psm"), mintPubkey.toBuffer()], program.programId);
+            const [psmVaultPda] = PublicKey.findProgramAddressSync([Buffer.from("psm_vault"), mintPubkey.toBuffer()], program.programId);
+            const [psmAuthorityPda] = PublicKey.findProgramAddressSync([Buffer.from("psm_authority")], program.programId);
+
+            const tx = await program.methods.configurePsm(feeBN)
+                .accounts({
+                    admin: wallet.publicKey,
+                    globalState: globalState,
+                    tokenMint: mintPubkey,
+                    psmConfig: psmConfigPda,
+                    psmVault: psmVaultPda,
+                    psmAuthority: psmAuthorityPda,
+                    tokenProgram: TOKEN_PROGRAM_ID,
+                    systemProgram: SystemProgram.programId,
+                    rent: SYSVAR_RENT_PUBKEY,
+                } as any).rpc();
+
+            setStatus("PSM Configured! Tx: " + tx);
+        } catch (e: any) {
+            console.error("Admin Action Error:", e);
+            if (e.logs) console.log("Transaction Logs:", e.logs);
+            let errMsg = e.message || e.toString();
+            if (errMsg.includes("already in use")) {
+                errMsg = "System is already initialized! You can skip this step.";
+            } else if (errMsg.includes("Attempt to debit an account")) {
+                errMsg = "Insufficient SOL setup. Please click 'Get Devnet SOL' first!";
+            } else if (e.logs) {
+                errMsg += " | Logs: " + e.logs.slice(-3).join(" ");
+            }
+            setStatus("Error: " + errMsg);
+        }
+    };
+
+    // Mock Tools
+    const [mockUsdc, setMockUsdc] = useState("Eu5sxWCpeYewZDE5Xy5wmBx3TNKjTL6ZYPWNRKMz3Dwm");
+    const [mockCollateral, setMockCollateral] = useState("5Yt9gRBDV7NRpNjEzPGgdptamh3w6uCLupotCEY1sXtQ");
+
+    const setupMocks = async () => {
+        if (!wallet.publicKey || !wallet.signTransaction) {
+            setStatus("Please connect your wallet first");
             return;
         }
+
         try {
-            setStatus("Requesting airdrop...");
-            const signature = await connection.requestAirdrop(
-                wallet.publicKey,
-                1 * 10 ** 9 // 1 SOL
+            setStatus("Preparing Mock Setup Transaction...");
+
+            const transaction = new Transaction();
+            const usdcMint = Keypair.generate();
+            const collMint = Keypair.generate();
+
+            // 1. Create USDC Mint Account
+            const lamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+            transaction.add(
+                SystemProgram.createAccount({
+                    fromPubkey: wallet.publicKey,
+                    newAccountPubkey: usdcMint.publicKey,
+                    space: MINT_SIZE,
+                    lamports,
+                    programId: TOKEN_PROGRAM_ID,
+                }),
+                createInitializeMintInstruction(usdcMint.publicKey, 6, wallet.publicKey, wallet.publicKey)
             );
-            await connection.confirmTransaction(signature, "confirmed");
-            setStatus(`Airdrop successful! Tx: ${signature}`);
+
+            // 2. Create Collateral Mint Account
+            transaction.add(
+                SystemProgram.createAccount({
+                    fromPubkey: wallet.publicKey,
+                    newAccountPubkey: collMint.publicKey,
+                    space: MINT_SIZE,
+                    lamports,
+                    programId: TOKEN_PROGRAM_ID,
+                }),
+                createInitializeMintInstruction(collMint.publicKey, 6, wallet.publicKey, wallet.publicKey)
+            );
+
+            // 3. Create ATAs and Mint
+            const userUsdcAta = getAssociatedTokenAddressSync(usdcMint.publicKey, wallet.publicKey);
+            const userCollAta = getAssociatedTokenAddressSync(collMint.publicKey, wallet.publicKey);
+
+            transaction.add(
+                createAssociatedTokenAccountInstruction(wallet.publicKey, userUsdcAta, wallet.publicKey, usdcMint.publicKey),
+                createMintToInstruction(usdcMint.publicKey, userUsdcAta, wallet.publicKey, 1000 * 1_000_000),
+                createAssociatedTokenAccountInstruction(wallet.publicKey, userCollAta, wallet.publicKey, collMint.publicKey),
+                createMintToInstruction(collMint.publicKey, userCollAta, wallet.publicKey, 1000 * 1_000_000)
+            );
+
+            transaction.feePayer = wallet.publicKey;
+            transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+            transaction.partialSign(usdcMint, collMint);
+
+            const signed = await wallet.signTransaction(transaction);
+            const txid = await connection.sendRawTransaction(signed.serialize());
+            await connection.confirmTransaction(txid);
+
+            setMockUsdc(usdcMint.publicKey.toBase58());
+            setMockCollateral(collMint.publicKey.toBase58());
+            setStatus(`Mocks Created & Minted! USDC: ${usdcMint.publicKey.toBase58().slice(0, 8)}..., Collateral: ${collMint.publicKey.toBase58().slice(0, 8)}...`);
+
         } catch (e: any) {
             console.error(e);
-            setStatus("Error requesting airdrop: " + e.message);
+            setStatus("Setup Failed: " + (e.message || e.toString()));
+        }
+    };
+
+    // Since creating mints in browser is complex without extra libs, 
+    // I will provide a button that helps them initialize with a predictable address 
+    // OR I will implement a simpler helper.
+
+    const [systemUsdt, setSystemUsdt] = useState("");
+
+    const showSystemInfo = () => {
+        const program = getProgram();
+        if (!program) return;
+        const [usdtMint] = PublicKey.findProgramAddressSync([Buffer.from("mint")], program.programId);
+        setSystemUsdt(usdtMint.toBase58());
+        setStatus("System USDT Mint: " + usdtMint.toBase58());
+    };
+
+    const requestAirdrop = async () => {
+        if (!wallet.publicKey) return;
+        try {
+            setStatus("Requesting airdrop...");
+            const tx = await connection.requestAirdrop(wallet.publicKey, 1_000_000_000);
+            await connection.confirmTransaction(tx);
+            setStatus("Airdrop successful! 1 SOL received.");
+        } catch (e: any) {
+            setStatus("Airdrop failed: " + e.message);
         }
     };
 
     return (
         <main className="flex min-h-screen flex-col items-center p-24 bg-slate-900 text-white">
-            <div className="w-full max-w-4xl flex justify-between items-center mb-10">
-                <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+            <div className="w-full max-w-4xl flex justify-between items-center mb-12">
+                <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-blue-500">
+                    Admin Dashboard
+                </h1>
                 <div className="flex gap-4">
-                    <button
-                        onClick={requestAirdrop}
-                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition"
-                    >
+                    <button onClick={requestAirdrop} className="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-xl font-bold transition">
                         Get Devnet SOL
                     </button>
                     <AppWalletMultiButton />
                 </div>
             </div>
 
-            <div className="w-full max-w-2xl bg-slate-800 p-8 rounded-xl shadow-lg mb-8">
-                <h2 className="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">1. Initialize System</h2>
-                <p className="text-gray-400 mb-4">Initialize the Global State and USDT Mint. Only needs to be done once.</p>
-                <button
-                    onClick={initialize}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition"
-                >
-                    Initialize Program
-                </button>
-            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl">
+                {/* 1. Initialize */}
+                <div className="bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-700">
+                    <h2 className="text-2xl font-bold mb-4">1. Initialize System</h2>
+                    <p className="text-slate-400 mb-6 text-sm">Create Global State and USDT Mint.</p>
+                    <button onClick={initialize} className="w-full bg-teal-600 hover:bg-teal-500 py-3 rounded-xl font-bold transition">
+                        Initialize Program
+                    </button>
+                </div>
 
-            <div className="w-full max-w-2xl bg-slate-800 p-8 rounded-xl shadow-lg">
-                <h2 className="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">2. Configure Collateral</h2>
-                <div className="flex flex-col gap-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Collateral Mint Address (e.g., SOL or USDC Mint)</label>
+                {/* 3. PSM */}
+                <div className="bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-700">
+                    <h2 className="text-2xl font-bold mb-4">2. Configure PSM</h2>
+                    <div className="space-y-4">
                         <input
                             type="text"
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                            placeholder="Enter Mint Address"
+                            placeholder="USDC Mint Address"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono"
+                            value={psmMint}
+                            onChange={(e) => setPsmMint(e.target.value)}
+                        />
+                        <input
+                            type="number"
+                            placeholder="Fee (bps) - e.g. 10 = 0.1%"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono"
+                            value={psmFee}
+                            onChange={(e) => setPsmFee(e.target.value)}
+                        />
+                        <button onClick={configurePsm} className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition">
+                            Configure PSM
+                        </button>
+                    </div>
+                </div>
+
+                {/* 3. Collateral */}
+                <div className="bg-slate-800 p-8 rounded-3xl shadow-xl border border-slate-700 md:col-span-2">
+                    <h2 className="text-2xl font-bold mb-4">3. Configure Collateral (CDP)</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                            type="text"
+                            placeholder="Collateral Mint Address"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono"
                             value={collateralMint}
                             onChange={(e) => setCollateralMint(e.target.value)}
                         />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Oracle Address (Pyth/Switchboard)</label>
                         <input
                             type="text"
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                            placeholder="Leave empty to generate random mock"
+                            placeholder="Oracle Address (optional)"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono"
                             value={oracle}
                             onChange={(e) => setOracle(e.target.value)}
                         />
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium mb-1">MCR (%)</label>
+                        <div className="flex gap-4">
                             <input
                                 type="number"
-                                className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                                placeholder="MCR %"
+                                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm"
                                 value={mcr}
                                 onChange={(e) => setMcr(e.target.value)}
                             />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">LTR (%)</label>
                             <input
                                 type="number"
-                                className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
+                                placeholder="LTR %"
+                                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm"
                                 value={ltr}
                                 onChange={(e) => setLtr(e.target.value)}
                             />
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-1">Penalty (%)</label>
-                            <input
-                                type="number"
-                                className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                                value={penalty}
-                                onChange={(e) => setPenalty(e.target.value)}
-                            />
+                    </div>
+                    <button onClick={configureCollateral} className="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-bold transition mt-6">
+                        Update Collateral Config
+                    </button>
+                </div>
+
+                {/* 4. Helper Section */}
+                <div className="bg-slate-800 p-8 rounded-3xl shadow-xl border border-teal-500/30 md:col-span-2">
+                    <h2 className="text-2xl font-bold mb-4 text-teal-400">4. Generated Keys (Localnet)</h2>
+                    <p className="text-slate-400 mb-6 text-sm">Copy these addresses to use in the configuration steps above.</p>
+                    <div className="space-y-4 font-mono text-xs">
+                        <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 flex flex-col gap-2">
+                            <div className="flex justify-between items-center">
+                                <span>Mock USDC:</span>
+                                <span className="text-blue-400">{mockUsdc}</span>
+                            </div>
+                            <button
+                                onClick={() => setPsmMint(mockUsdc)}
+                                className="text-[10px] text-blue-500 hover:text-blue-400 text-right uppercase font-bold"
+                            >
+                                ↑ Use for PSM
+                            </button>
+                        </div>
+                        <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 flex flex-col gap-2">
+                            <div className="flex justify-between items-center">
+                                <span>Mock Collateral:</span>
+                                <span className="text-purple-400">{mockCollateral}</span>
+                            </div>
+                            <button
+                                onClick={() => setCollateralMint(mockCollateral)}
+                                className="text-[10px] text-purple-500 hover:text-purple-400 text-right uppercase font-bold"
+                            >
+                                ↑ Use for Loan
+                            </button>
+                        </div>
+                        <div className="bg-slate-900 p-3 rounded-xl border border-slate-700 flex justify-between items-center">
+                            <span>System USDT (PDA):</span>
+                            <span className="text-emerald-400">pomt455FqnwDuTZF7QYq7PPKmbKHMoqysnLqLp5w7Un</span>
                         </div>
                     </div>
 
-                    <div className="flex gap-4 mt-2">
+                    <div className="mt-8 pt-6 border-t border-slate-700/50">
                         <button
-                            onClick={configureCollateral}
-                            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition"
+                            onClick={setupMocks}
+                            className="w-full bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-400 hover:to-blue-500 py-4 rounded-2xl font-bold text-lg shadow-lg shadow-teal-500/20 transition-all"
                         >
-                            Configure Collateral
+                            🚀 Setup Mock Assets (USDC & COLL)
                         </button>
-                        <button
-                            onClick={createMockCollateral}
-                            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition"
-                        >
-                            Create Mock Token
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div className="w-full max-w-2xl bg-slate-800 p-8 rounded-xl shadow-lg mt-8">
-                <h2 className="text-xl font-semibold mb-4 border-b border-gray-600 pb-2">3. Configure PSM (Peg Stability Module)</h2>
-                <div className="flex flex-col gap-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Stablecoin Asset Mint (e.g. USDC)</label>
-                        <input
-                            type="text"
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                            placeholder="Enter USDC Mint Address"
-                            value={psmMint}
-                            onChange={(e) => setPsmMint(e.target.value)}
-                        />
+                        <p className="mt-3 text-[10px] text-slate-500 text-center uppercase tracking-widest font-bold">
+                            Creates Mints + ATAs + Mints 1000 tokens
+                        </p>
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Swap Fee (Basis Points)</label>
-                        <input
-                            type="number"
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-600 text-white"
-                            placeholder="e.g. 10 for 0.1%"
-                            value={psmFee}
-                            onChange={(e) => setPsmFee(e.target.value)}
-                        />
-                        <p className="text-xs text-gray-400 mt-1">10 bps = 0.1% fee</p>
-                    </div>
-
-                    <div className="flex gap-4 mt-2">
-                        <button
-                            onClick={configurePsm}
-                            className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded transition"
-                        >
-                            Initialize PSM
-                        </button>
-                        <button
-                            onClick={async () => {
-                                await createMockCollateral();
-                                // Manual delay or check if collateralMint is updated
-                                setPsmMint(collateralMint);
-                            }}
-                            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition"
-                        >
-                            Create Mock USDC
-                        </button>
-                    </div>
+                    <button onClick={showSystemInfo} className="mt-4 text-xs text-slate-500 hover:text-teal-400 underline transition w-full text-center">
+                        Toggle System Address Display
+                    </button>
                 </div>
             </div>
 
             {status && (
-                <div className="mt-8 p-4 bg-slate-700 rounded-lg max-w-2xl w-full break-all">
-                    <h3 className="font-bold mb-2">Status:</h3>
-                    <p className="font-mono text-sm">{status}</p>
+                <div className="mt-12 p-4 bg-slate-800 border border-slate-700 rounded-2xl max-w-lg w-full">
+                    <p className="text-xs font-mono break-all text-slate-400 text-center">
+                        {status}
+                    </p>
                 </div>
-            )}
+            )
+            }
         </main>
     );
 }

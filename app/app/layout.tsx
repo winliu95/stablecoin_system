@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   description: "Compliant Stablecoin System on Solana",
 };
 
+import { Navbar } from "../components/Navbar";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -19,6 +21,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <WalletContextProvider>
+          <Navbar />
           {children}
         </WalletContextProvider>
       </body>

@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 };
 
 import { Navbar } from "../components/Navbar";
+import { SessionProvider } from "../components/SessionProvider";
 
 export default function RootLayout({
   children,
@@ -20,10 +21,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <WalletContextProvider>
-          <Navbar />
-          {children}
-        </WalletContextProvider>
+        <SessionProvider>
+          <WalletContextProvider>
+            <Navbar />
+            {children}
+          </WalletContextProvider>
+        </SessionProvider>
       </body>
     </html>
   );

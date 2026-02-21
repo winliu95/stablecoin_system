@@ -79,11 +79,13 @@ export default function RemitWizard() {
         }
     };
 
-    // Balances
+    // Balances & Exchange Rate
     const [twdBalance, setTwdBalance] = useState("0");
     const [usdtBalance, setUsdtBalance] = useState("0");
     const [receiverUsdtBalance, setReceiverUsdtBalance] = useState("0");
     const [receiverUsdBalance, setReceiverUsdBalance] = useState("0");
+    const [psmOracle, setPsmOracle] = useState<PublicKey | null>(null);
+    const [exchangeRate, setExchangeRate] = useState<number | null>(null);
 
     useEffect(() => {
         if (wallet.publicKey) {
@@ -98,6 +100,22 @@ export default function RemitWizard() {
             if (!program) return;
             const usdcMintPubkey = new PublicKey(usdcMint);
             const [usdtMint] = PublicKey.findProgramAddressSync([Buffer.from("mint")], program.programId);
+
+            // Fetch Oracle & Price
+            try {
+                const [psmConfigPda] = PublicKey.findProgramAddressSync([Buffer.from("psm"), usdcMintPubkey.toBuffer()], program.programId);
+                const psmConfigData = await program.account.psmConfig.fetch(psmConfigPda);
+                setPsmOracle(psmConfigData.oracle);
+
+                const oracleAcc = await connection.getAccountInfo(psmConfigData.oracle);
+                if (oracleAcc) {
+                    const priceBuf = oracleAcc.data.slice(8, 16);
+                    const price = new BN(priceBuf, 'le').toNumber();
+                    setExchangeRate(price / 1_000_000);
+                }
+            } catch (e) {
+                console.log("PSM not configured or Oracle missing for this mint.");
+            }
 
             // Fetch User Mock TWD (USDC)
             try {
@@ -117,14 +135,21 @@ export default function RemitWizard() {
             if (recipient) {
                 try {
                     const recipientPubkey = new PublicKey(recipient);
-                    const usdtAta = getAssociatedTokenAddressSync(usdtMint, recipientPubkey);
-                    const bal = await connection.getTokenAccountBalance(usdtAta);
-                    setReceiverUsdtBalance(bal.value.uiAmountString || "0");
 
-                    const usdcAta = getAssociatedTokenAddressSync(usdcMintPubkey, recipientPubkey);
-                    const balUsdc = await connection.getTokenAccountBalance(usdcAta);
-                    setReceiverUsdBalance(balUsdc.value.uiAmountString || "0");
+                    try {
+                        const usdtAta = getAssociatedTokenAddressSync(usdtMint, recipientPubkey);
+                        const bal = await connection.getTokenAccountBalance(usdtAta);
+                        setReceiverUsdtBalance(bal.value.uiAmountString || "0");
+                    } catch (e) { setReceiverUsdtBalance("0"); }
+
+                    try {
+                        const usdcAta = getAssociatedTokenAddressSync(usdcMintPubkey, recipientPubkey);
+                        const balUsdc = await connection.getTokenAccountBalance(usdcAta);
+                        setReceiverUsdBalance(balUsdc.value.uiAmountString || "0");
+                    } catch (e) { setReceiverUsdBalance("0"); }
+
                 } catch (e) {
+                    // Invalid public key format
                     setReceiverUsdtBalance("0");
                     setReceiverUsdBalance("0");
                 }
@@ -151,11 +176,14 @@ export default function RemitWizard() {
             const userUsdcAta = getAssociatedTokenAddressSync(usdcMintPubkey, wallet.publicKey);
             const userUsdtAta = getAssociatedTokenAddressSync(usdtMint, wallet.publicKey);
 
+            if (!psmOracle) throw new Error("PSM Oracle not found. Please wait for balance refresh or configure PSM.");
+
             const tx = await program.methods.swapUsdcToUsdt(amountBN)
                 .accounts({
                     user: wallet.publicKey,
                     psmConfig,
                     tokenMint: usdcMintPubkey,
+                    oracle: psmOracle,
                     psmVault: psmVault,
                     userTokenAccount: userUsdcAta,
                     usdtMint,
@@ -304,6 +332,8 @@ export default function RemitWizard() {
 
             let txSignature = "";
 
+            if (!psmOracle) throw new Error("PSM Oracle not found.");
+
             if (isLocalReceiver) {
                 // If using the built-in wallet, we must build and sign the Tx manually with the keypair
                 const ix = await program.methods.swapUsdtToUsdc(amountBN)
@@ -311,6 +341,7 @@ export default function RemitWizard() {
                         user: actingUserPubkey,
                         psmConfig,
                         tokenMint: usdcMintPubkey,
+                        oracle: psmOracle,
                         psmVault,
                         userTokenAccount: userUsdcAta,
                         usdtMint,
@@ -338,6 +369,7 @@ export default function RemitWizard() {
                         user: actingUserPubkey,
                         psmConfig,
                         tokenMint: usdcMintPubkey,
+                        oracle: psmOracle,
                         psmVault,
                         userTokenAccount: userUsdcAta,
                         usdtMint,
@@ -473,6 +505,21 @@ export default function RemitWizard() {
                                             <p className="text-2xl font-mono font-bold text-teal-400">{usdtBalance}</p>
                                         </div>
                                     </div>
+
+                                    {exchangeRate !== null && (
+                                        <div className="bg-slate-900 border border-slate-700/50 p-4 rounded-2xl flex justify-between items-center">
+                                            <div>
+                                                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Live Exchange Rate</p>
+                                                <p className="text-lg font-mono text-teal-400">1 TWD = ${exchangeRate.toFixed(4)} USD</p>
+                                            </div>
+                                            {amount && !isNaN(parseFloat(amount)) && (
+                                                <div className="text-right">
+                                                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-1">Estimated Output</p>
+                                                    <p className="text-lg font-mono font-bold text-white">~ {(parseFloat(amount) * exchangeRate).toFixed(2)} USDT</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     <div className="space-y-2">
                                         <label className="text-xs font-bold text-slate-500 uppercase">Input Token Mint (Bank Reserve)</label>

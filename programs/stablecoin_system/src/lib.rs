@@ -390,7 +390,9 @@ pub struct ConfigurePsm<'info> {
     #[account(seeds = [b"global_state"], bump = global_state.bump)]
     pub global_state: Account<'info, GlobalState>,
     pub token_mint: Account<'info, Mint>,
-    #[account(init, payer = admin, seeds = [b"psm", token_mint.key().as_ref()], bump, space = 8 + 32 + 32 + 8 + 8 + 1)]
+    /// CHECK: Oracle price feed account
+    pub oracle: AccountInfo<'info>,
+    #[account(init, payer = admin, seeds = [b"psm", token_mint.key().as_ref()], bump, space = 8 + 32 + 32 + 8 + 8 + 1 + 32)]
     pub psm_config: Account<'info, PsmConfig>,
     #[account(init, payer = admin, seeds = [b"psm_vault", token_mint.key().as_ref()], bump, token::mint = token_mint, token::authority = psm_authority)]
     pub psm_vault: Account<'info, TokenAccount>,
@@ -402,7 +404,7 @@ pub struct ConfigurePsm<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 #[account]
-pub struct PsmConfig { pub token_mint: Pubkey, pub vault: Pubkey, pub total_minted: u64, pub fee_basis_points: u64, pub bump: u8 }
+pub struct PsmConfig { pub token_mint: Pubkey, pub vault: Pubkey, pub total_minted: u64, pub fee_basis_points: u64, pub bump: u8, pub oracle: Pubkey }
 #[derive(Accounts)]
 pub struct SwapUsdcToUsdt<'info> {
     #[account(mut)]
@@ -410,6 +412,9 @@ pub struct SwapUsdcToUsdt<'info> {
     #[account(mut, seeds = [b"psm", token_mint.key().as_ref()], bump = psm_config.bump)]
     pub psm_config: Account<'info, PsmConfig>,
     pub token_mint: Account<'info, Mint>,
+    /// CHECK: Oracle price feed account, must match config
+    #[account(address = psm_config.oracle @ CustomErrorCode::InvalidOracle)]
+    pub oracle: AccountInfo<'info>,
     #[account(mut, seeds = [b"psm_vault", token_mint.key().as_ref()], bump)]
     pub psm_vault: Account<'info, TokenAccount>,
     #[account(mut, associated_token::mint = token_mint, associated_token::authority = user)]
@@ -439,6 +444,9 @@ pub struct SwapUsdtToUsdc<'info> {
     #[account(mut, seeds = [b"psm", token_mint.key().as_ref()], bump = psm_config.bump)]
     pub psm_config: Account<'info, PsmConfig>,
     pub token_mint: Account<'info, Mint>,
+    /// CHECK: Oracle price feed account, must match config
+    #[account(address = psm_config.oracle @ CustomErrorCode::InvalidOracle)]
+    pub oracle: AccountInfo<'info>,
     #[account(mut, seeds = [b"psm_vault", token_mint.key().as_ref()], bump)]
     pub psm_vault: Account<'info, TokenAccount>,
     #[account(
@@ -462,22 +470,30 @@ pub struct SwapUsdtToUsdc<'info> {
     pub system_program: Program<'info, System>,
 }
 pub fn configure_psm_handler(ctx: Context<ConfigurePsm>, fee: u64) -> Result<()> {
-    let c = &mut ctx.accounts.psm_config; c.token_mint = ctx.accounts.token_mint.key(); c.vault = ctx.accounts.psm_vault.key(); c.fee_basis_points = fee; c.bump = ctx.bumps.psm_config; Ok(())
+    let c = &mut ctx.accounts.psm_config; c.token_mint = ctx.accounts.token_mint.key(); c.vault = ctx.accounts.psm_vault.key(); c.fee_basis_points = fee; c.bump = ctx.bumps.psm_config; c.oracle = ctx.accounts.oracle.key(); Ok(())
 }
 pub fn swap_to_usdt_handler(ctx: Context<SwapUsdcToUsdt>, amount: u64) -> Result<()> {
     if ctx.accounts.global_state.paused { return err!(CustomErrorCode::Paused); }
+    let price = utils::get_price(&ctx.accounts.oracle)?;
+    // Mint Amount = (Deposit Amount * Price) / 1_000_000 (since price is scaled by 1e6)
+    let mint_amount = (amount as u128).checked_mul(price as u128).unwrap().checked_div(1_000_000).unwrap() as u64;
+
     token::transfer(CpiContext::new(ctx.accounts.token_program.to_account_info(), Transfer { from: ctx.accounts.user_token_account.to_account_info(), to: ctx.accounts.psm_vault.to_account_info(), authority: ctx.accounts.user.to_account_info() }), amount)?;
     let seeds = &[b"global_state".as_ref(), &[ctx.accounts.global_state.bump]];
-    token::mint_to(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), MintTo { mint: ctx.accounts.usdt_mint.to_account_info(), to: ctx.accounts.user_usdt_account.to_account_info(), authority: ctx.accounts.global_state.to_account_info() }, &[&seeds[..]]), amount)?;
-    ctx.accounts.psm_config.total_minted += amount; Ok(())
+    token::mint_to(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), MintTo { mint: ctx.accounts.usdt_mint.to_account_info(), to: ctx.accounts.user_usdt_account.to_account_info(), authority: ctx.accounts.global_state.to_account_info() }, &[&seeds[..]]), mint_amount)?;
+    ctx.accounts.psm_config.total_minted += mint_amount; Ok(())
 }
 pub fn swap_to_usdc_handler(ctx: Context<SwapUsdtToUsdc>, amount: u64) -> Result<()> {
     if ctx.accounts.global_state.paused { return err!(CustomErrorCode::Paused); }
+    let price = utils::get_price(&ctx.accounts.oracle)?;
+    // Withdraw Amount = (Burn Amount * 1_000_000) / Price
+    let withdraw_amount = (amount as u128).checked_mul(1_000_000).unwrap().checked_div(price as u128).unwrap() as u64;
+
     token::burn(CpiContext::new(ctx.accounts.token_program.to_account_info(), Burn { mint: ctx.accounts.usdt_mint.to_account_info(), from: ctx.accounts.user_usdt_account.to_account_info(), authority: ctx.accounts.user.to_account_info() }), amount)?;
     
     let seeds = &[b"psm_authority".as_ref(), &[ctx.bumps.psm_authority]];
-    token::transfer(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer { from: ctx.accounts.psm_vault.to_account_info(), to: ctx.accounts.user_token_account.to_account_info(), authority: ctx.accounts.psm_authority.to_account_info() }, &[&seeds[..]]), amount)?;
-    ctx.accounts.psm_config.total_minted -= amount; Ok(())
+    token::transfer(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), Transfer { from: ctx.accounts.psm_vault.to_account_info(), to: ctx.accounts.user_token_account.to_account_info(), authority: ctx.accounts.psm_authority.to_account_info() }, &[&seeds[..]]), withdraw_amount)?;
+    ctx.accounts.psm_config.total_minted = ctx.accounts.psm_config.total_minted.saturating_sub(amount); Ok(())
 }
 
 // --- Mock Oracle ---

@@ -73,4 +73,6 @@ pub enum CustomErrorCode {
     OracleError,
     #[msg("Oracle Price is Stale.")]
     OracleStale,
+    #[msg("Provided Oracle does not match PSM Configuration.")]
+    InvalidOracle,
 }

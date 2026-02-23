@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useSession } from "../../components/SessionProvider";
+import { DEMO_ACCOUNTS } from "../../components/SessionProvider";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Shield, User, Key, ArrowRight, Loader2 } from "lucide-react";
@@ -136,18 +137,36 @@ export default function LoginPage() {
                                     <p className="text-red-400 text-xs px-2 text-center">{error}</p>
                                 )}
 
-                                <div className="flex justify-center">
-                                    <button
-                                        type="button"
-                                        onClick={() => setPrivateKey(role === "admin"
-                                            ? "GcedLtR9LvT6jtMFeh1dsPPz5r6CV9zEBSF8HzY5gbpLu4M1H7ocqR2BV7oLoD598RqKUt99eP774JmwzYDKewe"
-                                            : "2reXpcGY6QomHeuK96mDnGmxg7Xq5pXcDeMoyZmPgPSmfMLLgUDxVugMahN2wvD6tU1MXPttwUSXGRcnGzLh7XLp"
-                                        )}
-                                        className={`text-[10px] ${role === 'admin' ? 'text-blue-500 hover:text-blue-400' : 'text-teal-500 hover:text-teal-400'} font-bold transition-colors uppercase tracking-widest`}
-                                    >
-                                        [ Autofill demo key ]
-                                    </button>
-                                </div>
+                                {role === "user" ? (
+                                    <div className="flex flex-col gap-2">
+                                        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold text-center">Quick Demo Login</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {Object.entries(DEMO_ACCOUNTS).map(([key, account]) => (
+                                                <button
+                                                    key={key}
+                                                    type="button"
+                                                    onClick={() => setPrivateKey(account.privateKey)}
+                                                    className={`text-[10px] py-2 px-3 rounded-xl font-bold transition-colors border ${privateKey === account.privateKey
+                                                        ? 'border-teal-500 text-teal-400 bg-teal-500/10'
+                                                        : 'border-slate-700 text-slate-500 hover:text-teal-400 hover:border-teal-500/50'
+                                                        }`}
+                                                >
+                                                    {account.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex justify-center">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPrivateKey("GcedLtR9LvT6jtMFeh1dsPPz5r6CV9zEBSF8HzY5gbpLu4M1H7ocqR2BV7oLoD598RqKUt99eP774JmwzYDKewe")}
+                                            className="text-[10px] text-blue-500 hover:text-blue-400 font-bold transition-colors uppercase tracking-widest"
+                                        >
+                                            [ Autofill Admin Demo Key ]
+                                        </button>
+                                    </div>
+                                )}
 
                                 <button
                                     disabled={isLoading}

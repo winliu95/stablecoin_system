@@ -14,6 +14,7 @@ import {
     createMintToInstruction
 } from "@solana/spl-token";
 import { useSession } from "../../components/SessionProvider";
+import { getAllKnownAccounts, KnownAccounts } from "../../components/SessionProvider";
 import { useRouter } from "next/navigation";
 import {
     Shield,
@@ -40,6 +41,11 @@ export default function AdminPage() {
     const [positions, setPositions] = useState<any[]>([]);
     const [globalState, setGlobalState] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [knownAccounts, setKnownAccounts] = useState<KnownAccounts>({});
+
+    const refreshAccounts = () => {
+        setKnownAccounts(getAllKnownAccounts());
+    };
 
     // --- Config State ---
     const [collateralMint, setCollateralMint] = useState("");
@@ -78,30 +84,45 @@ export default function AdminPage() {
         if (!program) return;
 
         setIsLoading(true);
+
+        // Fetch Positions (independent of globalState)
         try {
-            // Fetch Positions
             const allPositions = await (program.account as any).position.all();
             setPositions(allPositions.map((p: any) => ({
                 publicKey: p.publicKey.toBase58(),
                 ...p.account
             })));
+        } catch (e) {
+            console.warn("No positions found (program may not be initialized):", e);
+            setPositions([]);
+        }
 
-            // Fetch Global State
+        // Fetch Global State (may not exist if program not initialized)
+        try {
             const [globalStatePda] = PublicKey.findProgramAddressSync([Buffer.from("global_state")], program.programId);
             const state = await (program.account as any).globalState.fetch(globalStatePda);
             setGlobalState(state);
         } catch (e) {
-            console.error("Failed to fetch admin data:", e);
-        } finally {
-            setIsLoading(false);
+            console.warn("Global state not found — program may not be initialized yet.");
+            setGlobalState(null);
         }
+
+        setIsLoading(false);
     };
 
     useEffect(() => {
         if (isAuthenticated && role === "admin" && activeTab === "monitor") {
             fetchData();
+            refreshAccounts();
         }
     }, [isAuthenticated, role, activeTab]);
+
+    // Refresh known accounts every 3 seconds when on monitor tab
+    useEffect(() => {
+        if (activeTab !== "monitor") return;
+        const interval = setInterval(refreshAccounts, 3000);
+        return () => clearInterval(interval);
+    }, [activeTab]);
 
     const handleLogout = () => {
         logout();
@@ -385,6 +406,68 @@ export default function AdminPage() {
                                     </table>
                                 </div>
                             </div>
+
+                            {/* User Accounts (Mock Balances) Table */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden">
+                                <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                                    <div>
+                                        <h3 className="text-lg font-bold">User Accounts (Mock Balances)</h3>
+                                        <p className="text-xs text-slate-500 mt-0.5">Live view of all demo accounts' fiat and stablecoin balances.</p>
+                                    </div>
+                                    <button onClick={refreshAccounts} className="text-slate-400 hover:text-white transition" title="Refresh">
+                                        <RefreshCw size={18} />
+                                    </button>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead className="text-xs text-slate-500 uppercase font-bold bg-slate-900/50">
+                                            <tr>
+                                                <th className="px-6 py-4">Account</th>
+                                                <th className="px-6 py-4">NTD (Bank)</th>
+                                                <th className="px-6 py-4">USD (Bank)</th>
+                                                <th className="px-6 py-4">MNTD (Wallet)</th>
+                                                <th className="px-6 py-4">MUSD (Wallet)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800">
+                                            {Object.entries(knownAccounts).length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500 italic">
+                                                        No user accounts detected yet. Login as a user to populate.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                Object.entries(knownAccounts).map(([pubkey, acc]) => (
+                                                    <tr key={pubkey} className="hover:bg-slate-800/30 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex flex-col">
+                                                                <span className="font-bold text-sm">{acc.label || 'Unknown'}</span>
+                                                                <span className="font-mono text-xs text-blue-400">{pubkey.slice(0, 8)}...{pubkey.slice(-8)}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="font-bold">{(acc.ntd || 0).toLocaleString()}</span>
+                                                            <span className="text-xs text-slate-500 ml-1">NTD</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="font-bold">{(acc.usd || 0).toLocaleString()}</span>
+                                                            <span className="text-xs text-slate-500 ml-1">USD</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="font-bold text-teal-400">{(acc.mntd || 0).toLocaleString()}</span>
+                                                            <span className="text-xs text-slate-500 ml-1">MNTD</span>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="font-bold text-orange-400">{(acc.musd || 0).toLocaleString()}</span>
+                                                            <span className="text-xs text-slate-500 ml-1">MUSD</span>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </motion.div>
                     ) : (
                         <motion.div
@@ -476,7 +559,7 @@ export default function AdminPage() {
                     </div>
                 )}
             </div>
-        </main>
+        </main >
     );
 }
 

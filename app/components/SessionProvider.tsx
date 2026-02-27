@@ -33,6 +33,15 @@ export type KnownAccounts = {
     [pubkey: string]: AccountBalances & { label?: string };
 };
 
+export type TransferRecord = {
+    id: string; // Transaction Hash / ID
+    timestamp: number;
+    sender: string;
+    recipient: string;
+    currency: "mntd" | "musd";
+    amount: number;
+};
+
 const KNOWN_ACCOUNTS_KEY = "ytp_known_accounts";
 
 // Helper to get/set per-account balances from localStorage
@@ -95,9 +104,10 @@ interface SessionContextType {
     mockStablecoinBalances: { mntd: number; musd: number };
     updateFiatBalance: (currency: "ntd" | "usd", amount: number) => void;
     updateMockStablecoinBalance: (currency: "mntd" | "musd", amount: number) => void;
-    transferToAccount: (recipientPubkey: string, currency: "mntd" | "musd", amount: number) => void;
+    transferToAccount: (recipientPubkey: string, currency: "mntd" | "musd", amount: number, txHash?: string) => void;
     knownAccounts: KnownAccounts;
     refreshKnownAccounts: () => void;
+    transferHistory: TransferRecord[];
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
@@ -129,6 +139,7 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
     const [fiatBalances, setFiatBalances] = useState({ ntd: 0, usd: 0 });
     const [mockStablecoinBalances, setMockStablecoinBalances] = useState({ mntd: 0, musd: 0 });
     const [knownAccounts, setKnownAccounts] = useState<KnownAccounts>({});
+    const [transferHistory, setTransferHistory] = useState<TransferRecord[]>([]);
 
     const refreshKnownAccounts = useCallback(() => {
         setKnownAccounts(getAllKnownAccounts());
@@ -155,6 +166,9 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
                 const balances = loadAccountBalances(kp.publicKey.toBase58(), defaults);
                 setFiatBalances({ ntd: balances.ntd, usd: balances.usd });
                 setMockStablecoinBalances({ mntd: balances.mntd, musd: balances.musd });
+
+                const history = JSON.parse(localStorage.getItem("ytp_transfer_history") || "[]");
+                setTransferHistory(history);
             } catch (e) {
                 console.error("Failed to restore session:", e);
                 localStorage.removeItem("ytp_session_key");
@@ -224,7 +238,7 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
         refreshKnownAccounts();
     };
 
-    const transferToAccount = (recipientPubkey: string, currency: "mntd" | "musd", amount: number) => {
+    const transferToAccount = (recipientPubkey: string, currency: "mntd" | "musd", amount: number, txHash?: string) => {
         if (!keypair) return;
         const senderPubkey = keypair.publicKey.toBase58();
 
@@ -240,6 +254,21 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
 
         // Update sender's local state
         setMockStablecoinBalances(prev => ({ ...prev, [currency]: newSenderBalance }));
+
+        // Log transaction
+        const newRecord: TransferRecord = {
+            id: txHash || `mock-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            timestamp: Date.now(),
+            sender: senderPubkey,
+            recipient: recipientPubkey,
+            currency,
+            amount,
+        };
+        const currentHistory = JSON.parse(localStorage.getItem("ytp_transfer_history") || "[]");
+        const nextHistory = [newRecord, ...currentHistory];
+        localStorage.setItem("ytp_transfer_history", JSON.stringify(nextHistory));
+        setTransferHistory(nextHistory);
+
         refreshKnownAccounts();
     };
 
@@ -248,7 +277,8 @@ export const SessionProvider = ({ children }: { children: ReactNode }) => {
             keypair, role, login, logout, isAuthenticated: !!keypair,
             fiatBalances, updateFiatBalance,
             mockStablecoinBalances, updateMockStablecoinBalance,
-            transferToAccount, knownAccounts, refreshKnownAccounts
+            transferToAccount, knownAccounts, refreshKnownAccounts,
+            transferHistory
         }}>
             {children}
         </SessionContext.Provider>

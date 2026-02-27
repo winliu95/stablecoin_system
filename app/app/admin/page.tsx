@@ -33,7 +33,7 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function AdminPage() {
     const { getProgram } = useAnchorProgram();
     const { connection } = useConnection();
-    const { isAuthenticated, role, logout, keypair } = useSession();
+    const { isAuthenticated, role, logout, keypair, transferHistory } = useSession();
     const router = useRouter();
 
     const [activeTab, setActiveTab] = useState<"monitor" | "config">("monitor");
@@ -460,6 +460,72 @@ export default function AdminPage() {
                                                         <td className="px-6 py-4">
                                                             <span className="font-bold text-orange-400">{(acc.musd || 0).toLocaleString()}</span>
                                                             <span className="text-xs text-slate-500 ml-1">MUSD</span>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* System Transfer History Table */}
+                            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden mt-8">
+                                <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-blue-600/5">
+                                    <div>
+                                        <h3 className="text-lg font-bold">System Transfer History</h3>
+                                        <p className="text-xs text-slate-500 mt-0.5">Full audit log of all token transfers between users.</p>
+                                    </div>
+                                    <div className="bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20">
+                                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">{transferHistory?.length || 0} Records</span>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead className="text-xs text-slate-500 uppercase font-bold bg-slate-900/50">
+                                            <tr>
+                                                <th className="px-6 py-4">Time</th>
+                                                <th className="px-6 py-4">Sender</th>
+                                                <th className="px-6 py-4">Recipient</th>
+                                                <th className="px-6 py-4">Amount</th>
+                                                <th className="px-6 py-4">Transaction Hash</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800">
+                                            {!transferHistory || transferHistory.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-6 py-12 text-center text-slate-500 italic">
+                                                        No transfer history found.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                transferHistory.map((tx) => (
+                                                    <tr key={tx.id} className="hover:bg-slate-800/30 transition-colors">
+                                                        <td className="px-6 py-4 text-xs text-slate-400">
+                                                            {new Date(tx.timestamp).toLocaleString()}
+                                                        </td>
+                                                        <td className="px-6 py-4 font-mono text-xs text-blue-400">
+                                                            {tx.sender.slice(0, 8)}...{tx.sender.slice(-8)}
+                                                        </td>
+                                                        <td className="px-6 py-4 font-mono text-xs text-purple-400">
+                                                            {tx.recipient.slice(0, 8)}...{tx.recipient.slice(-8)}
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="font-black text-white">
+                                                                    {tx.amount.toLocaleString()}
+                                                                </span>
+                                                                <span className={`text-[10px] px-2 py-0.5 rounded-md uppercase font-black ${tx.currency === 'mntd' ? 'bg-teal-400/10 text-teal-400' : 'bg-orange-400/10 text-orange-400'}`}>
+                                                                    {tx.currency}
+                                                                </span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="group/hash flex items-center gap-2">
+                                                                <span className="font-mono text-xs text-green-400 group-hover/hash:text-green-300 transition-colors">
+                                                                    {tx.id.slice(0, 24)}...
+                                                                </span>
+                                                            </div>
                                                         </td>
                                                     </tr>
                                                 ))

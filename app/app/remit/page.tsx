@@ -104,7 +104,7 @@ export default function RemitWizard() {
             // Fetch Oracle & Price
             try {
                 const [psmConfigPda] = PublicKey.findProgramAddressSync([Buffer.from("psm"), usdcMintPubkey.toBuffer()], program.programId);
-                const psmConfigData = await program.account.psmConfig.fetch(psmConfigPda);
+                const psmConfigData = await (program.account as any).psmConfig.fetch(psmConfigPda);
                 setPsmOracle(psmConfigData.oracle);
 
                 const oracleAcc = await connection.getAccountInfo(psmConfigData.oracle);

@@ -40,7 +40,7 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function UserDashboard() {
     const { getProgram } = useAnchorProgram();
     const { connection } = useConnection();
-    const { isAuthenticated, role, logout, keypair, fiatBalances, updateFiatBalance, mockStablecoinBalances, updateMockStablecoinBalance, transferToAccount } = useSession();
+    const { isAuthenticated, role, logout, keypair, fiatBalances, updateFiatBalance, mockStablecoinBalances, updateMockStablecoinBalance, transferToAccount, transferHistory } = useSession();
     const router = useRouter();
 
     const [activeTab, setActiveTab] = useState<"summary" | "remit">("summary");
@@ -74,13 +74,10 @@ export default function UserDashboard() {
     const [remitStep, setRemitStep] = useState(1);
     const [remitStatus, setRemitStatus] = useState("");
     const [remitAmount, setRemitAmount] = useState("");
-    const [remitSourceCurrency, setRemitSourceCurrency] = useState<"ntd" | "usd">("ntd");
-    const [remitStablecoin, setRemitStablecoin] = useState<"mntd" | "musd">("mntd");
+    const [remitToken, setRemitToken] = useState<"mntd" | "musd">("mntd");
     const [recipient, setRecipient] = useState("");
-    const [receiverKeypair, setReceiverKeypair] = useState<Keypair | null>(null);
     const [exchangeRate, setExchangeRate] = useState<number | null>(null);
     const [psmOracle, setPsmOracle] = useState<PublicKey | null>(null);
-    const [receiverBalances, setReceiverBalances] = useState({ usdt: "0", usd: "0" });
 
     const USDC_MINT = "Eu5sxWCpeYewZDE5Xy5wmBx3TNKjTL6ZYPWNRKMz3Dwm"; // MNTD
     const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"; // MUSD
@@ -266,79 +263,33 @@ export default function UserDashboard() {
     };
 
     // --- Remit Actions ---
-    const handleMint = async () => {
-        const program = getProgram();
-        if (!program || !keypair || !remitAmount) return;
-        setIsLoading(true);
-        setStatus("Depositing TWD to Mint USDT...");
-        try {
-            const amountBN = new BN(parseFloat(remitAmount) * 1_000_000);
-            const usdcMintPubkey = new PublicKey(USDC_MINT);
-            const [uMint] = PublicKey.findProgramAddressSync([Buffer.from("mint")], program.programId);
-            const [globalState] = PublicKey.findProgramAddressSync([Buffer.from("global_state")], program.programId);
-            const [psmVault] = PublicKey.findProgramAddressSync([Buffer.from("psm_vault"), usdcMintPubkey.toBuffer()], program.programId);
-            const [psmConfig] = PublicKey.findProgramAddressSync([Buffer.from("psm"), usdcMintPubkey.toBuffer()], program.programId);
-            const [psmAuthority] = PublicKey.findProgramAddressSync([Buffer.from("psm_authority")], program.programId);
-
-            const userUsdcAta = getAssociatedTokenAddressSync(usdcMintPubkey, keypair.publicKey);
-            const userUsdtAta = getAssociatedTokenAddressSync(uMint, keypair.publicKey);
-
-            if (!psmOracle) throw new Error("PSM Oracle not found.");
-
-            await program.methods.swapUsdcToUsdt(amountBN)
-                .accounts({
-                    user: keypair.publicKey,
-                    psmConfig,
-                    tokenMint: usdcMintPubkey,
-                    oracle: psmOracle,
-                    psmVault,
-                    userTokenAccount: userUsdcAta,
-                    usdtMint: uMint,
-                    userUsdtAccount: userUsdtAta,
-                    psmAuthority,
-                    globalState,
-                    tokenProgram: TOKEN_PROGRAM_ID,
-                    associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-                    systemProgram: SystemProgram.programId,
-                } as any).rpc();
-
-            setStatus("TWD Deposited! USDT Minted.");
-            fetchData();
-            setTimeout(() => setRemitStep(2), 1000);
-        } catch (e: any) {
-            setStatus("Error: " + (e.message || e.toString()));
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const handleTransfer = async () => {
         if (!keypair || !recipient || !remitAmount) return;
         setIsLoading(true);
-        setRemitStatus("Sending funds to US recipient...");
+        setRemitStatus(`Sending ${remitAmount} ${remitToken.toUpperCase()}...`);
         try {
-            // Calculate the MUSD amount being sent
-            const musdAmount = remitSourceCurrency === 'ntd'
-                ? parseFloat(remitAmount) / (exchangeRate || 31.25)
-                : parseFloat(remitAmount);
+            const amount = parseFloat(remitAmount);
+            const tokenMint = remitToken === 'mntd' ? USDC_MINT : (musdMint?.toBase58() || USDT_MINT);
 
-            // Try on-chain transfer if musdMint is available
-            if (musdMint) {
+            // Try on-chain transfer if mint is available
+            if (tokenMint) {
                 try {
-                    const senderAta = getAssociatedTokenAddressSync(musdMint, keypair.publicKey);
-                    const receiverAta = getAssociatedTokenAddressSync(musdMint, new PublicKey(recipient));
+                    const mintPubKey = new PublicKey(tokenMint);
+                    const senderAta = getAssociatedTokenAddressSync(mintPubKey, keypair.publicKey);
+                    const receiverAta = getAssociatedTokenAddressSync(mintPubKey, new PublicKey(recipient));
 
                     const transaction = new Transaction();
                     const info = await connection.getAccountInfo(receiverAta);
                     if (!info) {
                         transaction.add(
-                            createAssociatedTokenAccountInstruction(keypair.publicKey, receiverAta, new PublicKey(recipient), musdMint)
+                            createAssociatedTokenAccountInstruction(keypair.publicKey, receiverAta, new PublicKey(recipient), mintPubKey)
                         );
                     }
                     transaction.add(
                         createTransferCheckedInstruction(
-                            senderAta, musdMint, receiverAta, keypair.publicKey,
-                            BigInt(Math.floor(musdAmount * 1_000_000)), 6
+                            senderAta, mintPubKey, receiverAta, keypair.publicKey,
+                            BigInt(Math.floor(amount * 1_000_000)), 6
                         )
                     );
                     const { blockhash } = await connection.getLatestBlockhash();
@@ -353,14 +304,12 @@ export default function UserDashboard() {
             }
 
             // Always update mock balances (PoC simulation)
-            // Debit sender's MUSD & credit recipient's MUSD in localStorage
-            transferToAccount(recipient, "musd", musdAmount);
-            // Also reduce sender's local mock balance
-            updateMockStablecoinBalance("musd", -musdAmount);
+            const mockHash = `mock-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            transferToAccount(recipient, remitToken, amount, mockHash);
 
             setRemitStatus("Transfer Complete!");
             fetchData();
-            setTimeout(() => setRemitStep(4), 1000);
+            setTimeout(() => setRemitStep(3), 1000);
         } catch (e: any) {
             setRemitStatus("Transfer failed: " + (e.message || e.toString()));
         } finally {
@@ -368,21 +317,6 @@ export default function UserDashboard() {
         }
     };
 
-    const handleRecipientRedeem = async () => {
-        setIsLoading(true);
-        setRemitStatus("Recipient is redeeming MUSD to USD (Bank)...");
-        try {
-            // Simulator: In a real system the recipient would perform this on their end.
-            await new Promise(r => setTimeout(r, 2000));
-            // For the sake of the demo, we show the end state
-            setRemitStatus("Redeemed! Funds now available in recipient's USD account.");
-            setRemitStep(5); // Completion step
-        } catch (e: any) {
-            setRemitStatus("Redeem failed: " + e.toString());
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     if (!isAuthenticated || role !== "user") return null;
 
@@ -537,6 +471,106 @@ export default function UserDashboard() {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Recent Transactions Table */}
+                            <div className="md:col-span-3 bg-slate-900 border border-slate-800 rounded-[40px] overflow-hidden shadow-2xl">
+                                <div className="p-8 border-b border-slate-800 flex justify-between items-center bg-teal-600/5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-teal-500/20 p-2 rounded-xl text-teal-400">
+                                            <History size={20} />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-xl font-bold">Recent Transactions</h3>
+                                            <p className="text-xs text-slate-500 mt-1">Movement of your digital stablecoins.</p>
+                                        </div>
+                                    </div>
+                                    <div className="bg-slate-950 px-4 py-2 rounded-2xl border border-slate-800">
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                            {(transferHistory?.filter(tx => tx.sender === keypair?.publicKey.toBase58() || tx.recipient === keypair?.publicKey.toBase58()).length || 0)} Total
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left">
+                                        <thead className="text-[10px] text-slate-500 uppercase font-black tracking-widest bg-slate-950/50">
+                                            <tr>
+                                                <th className="px-8 py-5">Type / Time</th>
+                                                <th className="px-8 py-5">Party</th>
+                                                <th className="px-8 py-5">Amount</th>
+                                                <th className="px-8 py-5">Transaction Hash</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800">
+                                            {(() => {
+                                                const myHistory = transferHistory?.filter(tx =>
+                                                    tx.sender === keypair?.publicKey.toBase58() ||
+                                                    tx.recipient === keypair?.publicKey.toBase58()
+                                                ).sort((a, b) => b.timestamp - a.timestamp) || [];
+
+                                                if (myHistory.length === 0) {
+                                                    return (
+                                                        <tr>
+                                                            <td colSpan={4} className="px-8 py-16 text-center text-slate-500 italic">
+                                                                No transactions yet. Start a remit or receive funds to see them here.
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                }
+
+                                                return myHistory.map((tx) => {
+                                                    const isSent = tx.sender === keypair?.publicKey.toBase58();
+                                                    const otherParty = isSent ? tx.recipient : tx.sender;
+
+                                                    return (
+                                                        <tr key={tx.id} className="hover:bg-teal-500/5 transition-colors group">
+                                                            <td className="px-8 py-6">
+                                                                <div className="flex items-center gap-4">
+                                                                    <div className={`p-2.5 rounded-xl ${isSent ? 'bg-red-500/10 text-red-500' : 'bg-teal-500/10 text-teal-500'}`}>
+                                                                        {isSent ? <ArrowUpRight size={16} /> : <ArrowDownLeft size={16} />}
+                                                                    </div>
+                                                                    <div className="flex flex-col">
+                                                                        <span className={`text-xs font-black uppercase tracking-wider ${isSent ? 'text-red-500' : 'text-teal-500'}`}>
+                                                                            {isSent ? 'Sent' : 'Received'}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-slate-500 mt-1">
+                                                                            {new Date(tx.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-8 py-6">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-xs text-slate-500 font-bold uppercase mb-1">{isSent ? 'To:' : 'From:'}</span>
+                                                                    <span className="font-mono text-[11px] text-blue-400 bg-blue-400/5 px-2 py-1 rounded-lg w-fit">
+                                                                        {otherParty.slice(0, 8)}...{otherParty.slice(-8)}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-8 py-6">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className={`text-lg font-black ${isSent ? 'text-white' : 'text-teal-400'}`}>
+                                                                        {tx.amount.toLocaleString()}
+                                                                    </span>
+                                                                    <span className={`text-[10px] px-2 py-0.5 rounded-md uppercase font-black ${tx.currency === 'mntd' ? 'bg-teal-400/10 text-teal-400' : 'bg-orange-400/10 text-orange-400'}`}>
+                                                                        {tx.currency}
+                                                                    </span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-8 py-6">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="font-mono text-[10px] text-green-400/70 group-hover:text-green-400 transition-colors">
+                                                                        {tx.id.slice(0, 24)}...
+                                                                    </span>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                });
+                                            })()}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </motion.div>
                     ) : (
                         <motion.div
@@ -546,14 +580,14 @@ export default function UserDashboard() {
                             exit={{ opacity: 0, x: -20 }}
                             className="bg-slate-900 border border-slate-800 p-10 rounded-[40px] shadow-2xl"
                         >
-                            {/* Remittance Wizard Inner UI (Simplified Version) */}
+                            {/* Remittance Wizard Inner UI — 3-step */}
                             <div className="flex items-center justify-between mb-8 border-b border-slate-800 pb-8">
                                 <div>
                                     <h2 className="text-2xl font-black">Cross-Border Remit Wizard</h2>
-                                    <p className="text-slate-500 text-sm">Transfer funds instantly from Taiwan to the USA.</p>
+                                    <p className="text-slate-500 text-sm">Send stablecoins directly to any wallet.</p>
                                 </div>
                                 <div className="flex gap-2">
-                                    {[1, 2, 3, 4].map(i => (
+                                    {[1, 2, 3].map(i => (
                                         <div key={i} className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${remitStep >= i ? 'bg-teal-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
                                             {i}
                                         </div>
@@ -562,198 +596,130 @@ export default function UserDashboard() {
                             </div>
 
                             <AnimatePresence mode="wait">
+                                {/* Step 1: Select Token & Amount */}
                                 {remitStep === 1 && (
                                     <motion.div key="r1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="bg-slate-950 p-4 rounded-3xl border border-slate-800 text-center">
-                                                <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Available {remitSourceCurrency === 'ntd' ? 'MNTD' : 'MUSD'}</p>
-                                                <p className="text-xl font-bold">{remitSourceCurrency === 'ntd' ? balances.mntd : balances.musd}</p>
-                                            </div>
-                                            <div className="bg-slate-950 p-4 rounded-3xl border border-slate-800 text-center">
-                                                <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Exchange Rate</p>
-                                                <p className="text-xl font-bold text-teal-400">{exchangeRate?.toFixed(4) || "..."}</p>
-                                            </div>
-                                        </div>
-                                        <div className="space-y-4">
+                                        {/* Token Selector */}
+                                        <div>
+                                            <label className="text-xs font-black text-slate-500 uppercase ml-2 tracking-widest mb-3 block">Select Token to Send</label>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <button
-                                                    onClick={() => setRemitSourceCurrency("ntd")}
-                                                    className={`py-3 rounded-2xl font-bold transition ${remitSourceCurrency === 'ntd' ? 'bg-blue-600 text-white' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                                    onClick={() => setRemitToken("mntd")}
+                                                    className={`py-4 rounded-2xl font-bold transition flex flex-col items-center gap-1 ${remitToken === 'mntd' ? 'bg-teal-600 text-white ring-2 ring-teal-400' : 'bg-slate-950 text-slate-400 border border-slate-800'
+                                                        }`}
                                                 >
-                                                    Send TWD
+                                                    <span className="text-lg">MNTD</span>
+                                                    <span className="text-xs opacity-60">Balance: {mockStablecoinBalances.mntd.toLocaleString()}</span>
                                                 </button>
                                                 <button
-                                                    onClick={() => setRemitSourceCurrency("usd")}
-                                                    className={`py-3 rounded-2xl font-bold transition ${remitSourceCurrency === 'usd' ? 'bg-green-600 text-white' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                                    onClick={() => setRemitToken("musd")}
+                                                    className={`py-4 rounded-2xl font-bold transition flex flex-col items-center gap-1 ${remitToken === 'musd' ? 'bg-blue-600 text-white ring-2 ring-blue-400' : 'bg-slate-950 text-slate-400 border border-slate-800'
+                                                        }`}
                                                 >
-                                                    Send USD
+                                                    <span className="text-lg">MUSD</span>
+                                                    <span className="text-xs opacity-60">Balance: {mockStablecoinBalances.musd.toLocaleString()}</span>
                                                 </button>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">Amount to Transfer</label>
-                                                <div className="relative">
-                                                    <input
-                                                        type="number"
-                                                        value={remitAmount}
-                                                        onChange={(e) => setRemitAmount(e.target.value)}
-                                                        className="w-full bg-slate-950 border border-slate-800 p-6 rounded-3xl text-3xl font-black outline-none focus:border-teal-500 transition"
-                                                        placeholder="0.00"
-                                                    />
-                                                    <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold">{remitSourceCurrency.toUpperCase()}</div>
-                                                </div>
-                                            </div>
                                         </div>
+
+                                        {/* Amount Input */}
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">Amount to Send</label>
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    value={remitAmount}
+                                                    onChange={(e) => setRemitAmount(e.target.value)}
+                                                    className="w-full bg-slate-950 border border-slate-800 p-6 rounded-3xl text-3xl font-black outline-none focus:border-teal-500 transition"
+                                                    placeholder="0.00"
+                                                />
+                                                <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{remitToken}</div>
+                                            </div>
+                                            <p className="text-xs text-slate-500 text-right pr-2">
+                                                Available: {(remitToken === 'mntd' ? mockStablecoinBalances.mntd : mockStablecoinBalances.musd).toLocaleString()} {remitToken.toUpperCase()}
+                                            </p>
+                                        </div>
+
                                         <button
-                                            onClick={async () => {
+                                            onClick={() => {
                                                 const amount = parseFloat(remitAmount);
-                                                if (isNaN(amount) || amount <= 0) {
-                                                    setStatus("Invalid amount.");
-                                                    return;
-                                                }
-                                                if (fiatBalances[remitSourceCurrency] < amount) {
-                                                    setStatus(`Insufficient Bank ${remitSourceCurrency.toUpperCase()}.`);
-                                                    return;
-                                                }
-                                                setIsLoading(true);
-                                                const stable = remitSourceCurrency === "ntd" ? "mntd" : "musd";
-                                                setRemitStablecoin(stable);
-                                                setRemitStatus(`Initiating Bank Mint to ${stable.toUpperCase()}...`);
-                                                await new Promise(r => setTimeout(r, 1000));
-                                                updateFiatBalance(remitSourceCurrency, -amount);
-                                                updateMockStablecoinBalance(stable, amount);
-                                                setRemitStatus(`${remitSourceCurrency.toUpperCase()} successfully moved to Blockchain as ${stable.toUpperCase()}.`);
-                                                setIsLoading(false);
+                                                const available = remitToken === 'mntd' ? mockStablecoinBalances.mntd : mockStablecoinBalances.musd;
+                                                if (isNaN(amount) || amount <= 0) { setRemitStatus("Please enter a valid amount."); return; }
+                                                if (amount > available) { setRemitStatus(`Insufficient ${remitToken.toUpperCase()} balance.`); return; }
+                                                setRemitStatus("");
                                                 setRemitStep(2);
                                             }}
-                                            disabled={!remitAmount || isLoading}
+                                            disabled={!remitAmount}
                                             className="w-full bg-teal-600 hover:bg-teal-500 py-5 rounded-3xl font-black text-xl transition flex items-center justify-center gap-2"
                                         >
-                                            {isLoading ? <RefreshCw className="animate-spin" /> : <>Next: Prepare Funds <ChevronRight /></>}
+                                            Next: Enter Recipient <ChevronRight />
                                         </button>
+                                        {remitStatus && <p className="text-red-400 text-xs text-center">{remitStatus}</p>}
                                     </motion.div>
                                 )}
+
+                                {/* Step 2: Recipient + Confirm */}
                                 {remitStep === 2 && (
                                     <motion.div key="r2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                                        {/* Summary */}
                                         <div className="bg-teal-600/5 border border-teal-500/20 p-6 rounded-3xl flex items-center justify-between">
                                             <div className="flex items-center gap-3">
                                                 <div className="bg-teal-500/20 p-2 rounded-lg text-teal-400"><CheckCircle2 size={18} /></div>
-                                                <span className="font-bold">{remitStablecoin.toUpperCase()} Minted:</span>
+                                                <span className="font-bold">Sending:</span>
                                             </div>
-                                            <span className="font-black text-xl text-teal-400">{remitAmount} {remitStablecoin.toUpperCase()}</span>
+                                            <span className="font-black text-xl text-teal-400">{parseFloat(remitAmount).toLocaleString()} {remitToken.toUpperCase()}</span>
                                         </div>
-                                        <div className="p-6 bg-slate-950 border border-slate-800 rounded-3xl text-center">
-                                            <p className="text-xs text-slate-500 uppercase font-bold mb-2">
-                                                {remitStablecoin === "mntd" ? "Convert to MUSD (Swap Fee: 0%)" : "Funds Ready for Transfer"}
-                                            </p>
-                                            <p className="text-3xl font-black text-white">
-                                                {remitStablecoin === "mntd"
-                                                    ? `${(parseFloat(remitAmount) / (exchangeRate || 31.25)).toFixed(2)} MUSD`
-                                                    : `${remitAmount} MUSD`
-                                                }
-                                            </p>
-                                        </div>
-                                        <div className="flex gap-4">
-                                            <button onClick={() => setRemitStep(1)} className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold">Back</button>
-                                            <button
-                                                onClick={async () => {
-                                                    if (remitStablecoin === "mntd") {
-                                                        await handleExecuteSwap("mntd", remitAmount, true);
-                                                        setRemitStablecoin("musd");
-                                                    }
-                                                    setRemitStep(3);
-                                                }}
-                                                disabled={isLoading}
-                                                className="flex-[2] bg-teal-600 hover:bg-teal-500 py-5 rounded-3xl font-black text-xl transition flex items-center justify-center gap-2"
-                                            >
-                                                {isLoading ? <RefreshCw className="animate-spin" /> : <>Next: {remitStablecoin === 'mntd' ? 'Swap to MUSD' : 'Proceed to Transfer'} <ChevronRight size={18} /></>}
-                                            </button>
-                                        </div>
-                                    </motion.div>
-                                )}
-                                {remitStep === 3 && (
-                                    <motion.div key="r3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                                        <div className="bg-blue-600/5 border border-blue-500/20 p-6 rounded-3xl flex items-center justify-between">
-                                            <div className="flex items-center gap-3">
-                                                <div className="bg-blue-500/20 p-2 rounded-lg text-blue-400"><CheckCircle2 size={18} /></div>
-                                                <span className="font-bold">MUSD Prepared:</span>
-                                            </div>
-                                            <span className="font-black text-xl text-teal-400">
-                                                {remitSourceCurrency === 'ntd'
-                                                    ? (parseFloat(remitAmount) / (exchangeRate || 31.25)).toFixed(2)
-                                                    : parseFloat(remitAmount).toFixed(2)
-                                                } MUSD
-                                            </span>
-                                        </div>
+
+                                        {/* Recipient Address */}
                                         <div className="space-y-2">
-                                            <label className="text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">US Recipient Address (Solana)</label>
+                                            <label className="text-xs font-black text-slate-500 uppercase ml-2 tracking-widest">Recipient Wallet Address (Solana)</label>
                                             <input
                                                 type="text"
                                                 value={recipient}
                                                 onChange={(e) => setRecipient(e.target.value)}
-                                                className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl font-mono text-sm outline-none focus:border-blue-500 transition"
+                                                className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl font-mono text-sm outline-none focus:border-teal-500 transition"
                                                 placeholder="Recipient Solana Public Key"
                                             />
                                         </div>
+
                                         <div className="flex gap-4">
-                                            <button onClick={() => setRemitStep(2)} className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold">Back</button>
+                                            <button onClick={() => setRemitStep(1)} className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold">Back</button>
                                             <button
                                                 onClick={handleTransfer}
                                                 disabled={!recipient || isLoading}
-                                                className="flex-[2] bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black flex items-center justify-center gap-2"
+                                                className="flex-[2] bg-teal-600 hover:bg-teal-500 py-4 rounded-2xl font-black flex items-center justify-center gap-2"
                                             >
-                                                {isLoading ? <RefreshCw className="animate-spin" /> : <>Send to USA <Send size={18} /></>}
+                                                {isLoading ? <RefreshCw className="animate-spin" /> : <>Send {remitToken.toUpperCase()} <Send size={18} /></>}
                                             </button>
                                         </div>
-                                    </motion.div>
-                                )}
-
-                                {remitStep === 4 && (
-                                    <motion.div key="r4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8 text-center">
-                                        <div className="w-20 h-20 bg-blue-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                                            <Landmark className="text-blue-400" size={40} />
-                                        </div>
-                                        <div>
-                                            <h3 className="text-2xl font-black">Final Step: Withdraw to Bank</h3>
-                                            <p className="text-slate-500 text-sm mt-2">The recipient has received MUSD in their digital wallet. Proceed to deposit into their US Bank Account.</p>
-                                        </div>
-                                        <div className="bg-slate-950 p-6 rounded-3xl border border-dashed border-slate-800">
-                                            <p className="text-xs text-slate-500 uppercase font-bold mb-2">Redemption Value</p>
-                                            <p className="text-3xl font-black text-white">
-                                                $ {remitSourceCurrency === 'ntd'
-                                                    ? (parseFloat(remitAmount) / (exchangeRate || 31.25)).toFixed(2)
-                                                    : parseFloat(remitAmount).toFixed(2)
-                                                } USD
+                                        {remitStatus && (
+                                            <p className={`text-xs text-center ${remitStatus.includes('failed') || remitStatus.includes('Invalid') ? 'text-red-400' : 'text-teal-400'}`}>
+                                                {remitStatus}
                                             </p>
-                                        </div>
-                                        <button
-                                            onClick={async () => {
-                                                setIsLoading(true);
-                                                setStatus("Simulating Recipient Bank Redemption...");
-                                                await new Promise(r => setTimeout(r, 2000));
-                                                setStatus("Success! Recipient received USD in their bank account.");
-                                                setIsLoading(false);
-                                                setRemitStep(5);
-                                            }}
-                                            disabled={isLoading}
-                                            className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-3xl font-black text-xl transition flex items-center justify-center gap-2"
-                                        >
-                                            {isLoading ? <RefreshCw className="animate-spin" /> : <>Redeem to US Bank <ArrowDownLeft size={22} /></>}
-                                        </button>
+                                        )}
                                     </motion.div>
                                 )}
 
-                                {remitStep === 5 && (
-                                    <motion.div key="r5" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8">
-                                        <div className="w-20 h-20 bg-teal-600/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                {/* Step 3: Success */}
+                                {remitStep === 3 && (
+                                    <motion.div key="r3" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-8 space-y-6">
+                                        <div className="w-20 h-20 bg-teal-600/20 rounded-full flex items-center justify-center mx-auto">
                                             <CheckCircle2 className="text-teal-400" size={40} />
                                         </div>
-                                        <h3 className="text-2xl font-black mb-2">Remittance Complete!</h3>
-                                        <p className="text-slate-500 mb-8">NTD converted to USD and deposited into the US recipient's account.</p>
+                                        <div>
+                                            <h3 className="text-2xl font-black mb-2">Transfer Complete!</h3>
+                                            <p className="text-slate-500 text-sm">The recipient has received the stablecoins in their wallet and can swap or redeem at their convenience.</p>
+                                        </div>
+                                        <div className="bg-slate-950 border border-slate-800 p-5 rounded-3xl">
+                                            <p className="text-xs text-slate-500 uppercase font-bold mb-2">Sent</p>
+                                            <p className="text-3xl font-black">{parseFloat(remitAmount).toLocaleString()} {remitToken.toUpperCase()}</p>
+                                            <p className="font-mono text-xs text-blue-400 mt-2 break-all">{recipient}</p>
+                                        </div>
                                         <button
                                             onClick={() => { setRemitStep(1); setRemitAmount(""); setRecipient(""); setRemitStatus(""); }}
                                             className="bg-slate-800 hover:bg-slate-700 px-8 py-3 rounded-2xl font-bold transition"
                                         >
-                                            Close Wizard
+                                            New Transfer
                                         </button>
                                     </motion.div>
                                 )}
@@ -763,229 +729,237 @@ export default function UserDashboard() {
                 </AnimatePresence>
 
                 {/* Mint Modal */}
-                {isMintModalOpen && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                        <motion.div
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-md"
-                            onClick={() => setIsMintModalOpen(false)}
-                        />
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                            className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
-                        >
-                            <h3 className="text-xl font-bold mb-6">Mint Stablecoin</h3>
+                {
+                    isMintModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                            <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                className="absolute inset-0 bg-black/80 backdrop-blur-md"
+                                onClick={() => setIsMintModalOpen(false)}
+                            />
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                                className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
+                            >
+                                <h3 className="text-xl font-bold mb-6">Mint Stablecoin</h3>
 
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">Source Currency</label>
-                                    <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">Source Currency</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button
+                                                onClick={() => setMintCurrency("ntd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${mintCurrency === 'ntd' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                NTD (Bank)
+                                            </button>
+                                            <button
+                                                onClick={() => setMintCurrency("usd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${mintCurrency === 'usd' ? 'bg-green-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                USD (Bank)
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Mint</label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={mintAmount}
+                                                onChange={(e) => setMintAmount(e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
+                                                placeholder="0.00"
+                                                autoFocus
+                                            />
+                                            <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{mintCurrency}</div>
+                                        </div>
+                                        <p className="text-[10px] text-slate-600 px-2 italic">Result: {mintAmount || "0"} {mintCurrency === "ntd" ? "MNTD" : "MUSD"} (1:1 Peg)</p>
+                                    </div>
+
+                                    <div className="flex gap-4 pt-4">
                                         <button
-                                            onClick={() => setMintCurrency("ntd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${mintCurrency === 'ntd' ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={() => setIsMintModalOpen(false)}
+                                            className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
                                         >
-                                            NTD (Bank)
+                                            Cancel
                                         </button>
                                         <button
-                                            onClick={() => setMintCurrency("usd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${mintCurrency === 'usd' ? 'bg-green-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={handleExecuteMint}
+                                            disabled={!mintAmount || isLoading}
+                                            className="flex-[2] bg-teal-600 hover:bg-teal-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
                                         >
-                                            USD (Bank)
+                                            {isLoading ? <RefreshCw className="animate-spin" /> : <>Mint Token <ChevronRight size={18} /></>}
                                         </button>
                                     </div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Mint</label>
-                                    <div className="relative">
-                                        <input
-                                            type="number"
-                                            value={mintAmount}
-                                            onChange={(e) => setMintAmount(e.target.value)}
-                                            className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
-                                            placeholder="0.00"
-                                            autoFocus
-                                        />
-                                        <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{mintCurrency}</div>
-                                    </div>
-                                    <p className="text-[10px] text-slate-600 px-2 italic">Result: {mintAmount || "0"} {mintCurrency === "ntd" ? "MNTD" : "MUSD"} (1:1 Peg)</p>
-                                </div>
-
-                                <div className="flex gap-4 pt-4">
-                                    <button
-                                        onClick={() => setIsMintModalOpen(false)}
-                                        className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handleExecuteMint}
-                                        disabled={!mintAmount || isLoading}
-                                        className="flex-[2] bg-teal-600 hover:bg-teal-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
-                                    >
-                                        {isLoading ? <RefreshCw className="animate-spin" /> : <>Mint Token <ChevronRight size={18} /></>}
-                                    </button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
+                            </motion.div>
+                        </div>
+                    )
+                }
 
                 {/* Redeem Modal */}
-                {isRedeemModalOpen && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                        <motion.div
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-md"
-                            onClick={() => setIsRedeemModalOpen(false)}
-                        />
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                            className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
-                        >
-                            <h3 className="text-xl font-bold mb-6">Redeem to Bank</h3>
+                {
+                    isRedeemModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                            <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                className="absolute inset-0 bg-black/80 backdrop-blur-md"
+                                onClick={() => setIsRedeemModalOpen(false)}
+                            />
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                                className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
+                            >
+                                <h3 className="text-xl font-bold mb-6">Redeem to Bank</h3>
 
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">Source Stablecoin</label>
-                                    <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">Source Stablecoin</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button
+                                                onClick={() => setRedeemCurrency("mntd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${redeemCurrency === 'mntd' ? 'bg-teal-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                MNTD (Wallet)
+                                            </button>
+                                            <button
+                                                onClick={() => setRedeemCurrency("musd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${redeemCurrency === 'musd' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                MUSD (Wallet)
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Redeem</label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={redeemAmount}
+                                                onChange={(e) => setRedeemAmount(e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
+                                                placeholder="0.00"
+                                                autoFocus
+                                            />
+                                            <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{redeemCurrency}</div>
+                                        </div>
+                                        <p className="text-[10px] text-slate-600 px-2 italic">Result: {redeemAmount || "0"} {redeemCurrency === "mntd" ? "NTD" : "USD"} (1:1 Peg)</p>
+                                    </div>
+
+                                    <div className="flex gap-4 pt-4">
                                         <button
-                                            onClick={() => setRedeemCurrency("mntd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${redeemCurrency === 'mntd' ? 'bg-teal-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={() => setIsRedeemModalOpen(false)}
+                                            className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
                                         >
-                                            MNTD (Wallet)
+                                            Cancel
                                         </button>
                                         <button
-                                            onClick={() => setRedeemCurrency("musd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${redeemCurrency === 'musd' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={handleExecuteRedeem}
+                                            disabled={!redeemAmount || isLoading}
+                                            className="flex-[2] bg-teal-600 hover:bg-teal-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
                                         >
-                                            MUSD (Wallet)
+                                            {isLoading ? <RefreshCw className="animate-spin" /> : <>Redeem to Bank <ChevronRight size={18} /></>}
                                         </button>
                                     </div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Redeem</label>
-                                    <div className="relative">
-                                        <input
-                                            type="number"
-                                            value={redeemAmount}
-                                            onChange={(e) => setRedeemAmount(e.target.value)}
-                                            className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
-                                            placeholder="0.00"
-                                            autoFocus
-                                        />
-                                        <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{redeemCurrency}</div>
-                                    </div>
-                                    <p className="text-[10px] text-slate-600 px-2 italic">Result: {redeemAmount || "0"} {redeemCurrency === "mntd" ? "NTD" : "USD"} (1:1 Peg)</p>
-                                </div>
-
-                                <div className="flex gap-4 pt-4">
-                                    <button
-                                        onClick={() => setIsRedeemModalOpen(false)}
-                                        className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handleExecuteRedeem}
-                                        disabled={!redeemAmount || isLoading}
-                                        className="flex-[2] bg-teal-600 hover:bg-teal-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
-                                    >
-                                        {isLoading ? <RefreshCw className="animate-spin" /> : <>Redeem to Bank <ChevronRight size={18} /></>}
-                                    </button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
+                            </motion.div>
+                        </div>
+                    )
+                }
 
                 {/* Swap Modal */}
-                {isSwapModalOpen && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-                        <motion.div
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-md"
-                            onClick={() => setIsSwapModalOpen(false)}
-                        />
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                            className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
-                        >
-                            <h3 className="text-xl font-bold mb-6">Asset Swap</h3>
+                {
+                    isSwapModalOpen && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+                            <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                className="absolute inset-0 bg-black/80 backdrop-blur-md"
+                                onClick={() => setIsSwapModalOpen(false)}
+                            />
+                            <motion.div
+                                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                                className="relative bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-[40px] shadow-2xl"
+                            >
+                                <h3 className="text-xl font-bold mb-6">Asset Swap</h3>
 
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">From Token</label>
-                                    <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-2 block">From Token</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <button
+                                                onClick={() => setSwapFromToken("mntd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${swapFromToken === 'mntd' ? 'bg-teal-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                MNTD
+                                            </button>
+                                            <button
+                                                onClick={() => setSwapFromToken("musd")}
+                                                className={`py-3 rounded-2xl font-bold transition ${swapFromToken === 'musd' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            >
+                                                MUSD
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Swap</label>
+                                        <div className="relative">
+                                            <input
+                                                type="number"
+                                                value={swapAmount}
+                                                onChange={(e) => setSwapAmount(e.target.value)}
+                                                className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
+                                                placeholder="0.00"
+                                                autoFocus
+                                            />
+                                            <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{swapFromToken}</div>
+                                        </div>
+                                        <div className="flex justify-between px-2">
+                                            <p className="text-[10px] text-slate-600 italic">
+                                                Result: {swapAmount || "0"} {swapFromToken === "mntd"
+                                                    ? (parseFloat(swapAmount || "0") / (exchangeRate || 31.25)).toFixed(2) + " MUSD"
+                                                    : (parseFloat(swapAmount || "0") * (exchangeRate || 31.25)).toFixed(0) + " MNTD"}
+                                            </p>
+                                            <p className="text-[10px] text-slate-500">Fee: $0.00</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-4 pt-4">
                                         <button
-                                            onClick={() => setSwapFromToken("mntd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${swapFromToken === 'mntd' ? 'bg-teal-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={() => setIsSwapModalOpen(false)}
+                                            className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
                                         >
-                                            MNTD
+                                            Cancel
                                         </button>
                                         <button
-                                            onClick={() => setSwapFromToken("musd")}
-                                            className={`py-3 rounded-2xl font-bold transition ${swapFromToken === 'musd' ? 'bg-orange-600 text-white shadow-lg' : 'bg-slate-950 text-slate-500 border border-slate-800'}`}
+                                            onClick={() => handleExecuteSwap(swapFromToken, swapAmount)}
+                                            disabled={!swapAmount || isLoading}
+                                            className="flex-[2] bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
                                         >
-                                            MUSD
+                                            {isLoading ? <RefreshCw className="animate-spin" /> : <>Swap Assets <RefreshCw size={18} /></>}
                                         </button>
                                     </div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1 block">Amount to Swap</label>
-                                    <div className="relative">
-                                        <input
-                                            type="number"
-                                            value={swapAmount}
-                                            onChange={(e) => setSwapAmount(e.target.value)}
-                                            className="w-full bg-slate-950 border border-slate-800 p-5 rounded-3xl text-2xl font-black outline-none focus:border-teal-500 transition"
-                                            placeholder="0.00"
-                                            autoFocus
-                                        />
-                                        <div className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-500 font-bold uppercase">{swapFromToken}</div>
-                                    </div>
-                                    <div className="flex justify-between px-2">
-                                        <p className="text-[10px] text-slate-600 italic">
-                                            Result: {swapAmount || "0"} {swapFromToken === "mntd"
-                                                ? (parseFloat(swapAmount || "0") / (exchangeRate || 31.25)).toFixed(2) + " MUSD"
-                                                : (parseFloat(swapAmount || "0") * (exchangeRate || 31.25)).toFixed(0) + " MNTD"}
-                                        </p>
-                                        <p className="text-[10px] text-slate-500">Fee: $0.00</p>
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-4 pt-4">
-                                    <button
-                                        onClick={() => setIsSwapModalOpen(false)}
-                                        className="flex-1 bg-slate-800 hover:bg-slate-700 py-4 rounded-2xl font-bold transition"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={() => handleExecuteSwap(swapFromToken, swapAmount)}
-                                        disabled={!swapAmount || isLoading}
-                                        className="flex-[2] bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black transition flex items-center justify-center gap-2"
-                                    >
-                                        {isLoading ? <RefreshCw className="animate-spin" /> : <>Swap Assets <RefreshCw size={18} /></>}
-                                    </button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-
-                {status && (
-                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 max-w-lg w-full px-6 z-50">
-                        <div className="bg-slate-900 border border-slate-700 p-4 rounded-2xl shadow-2xl flex items-center gap-3">
-                            <AlertCircle className="text-teal-400 shrink-0" size={20} />
-                            <p className="text-xs font-mono text-slate-300 break-all">{status}</p>
+                            </motion.div>
                         </div>
-                    </div>
-                )}
+                    )
+                }
+
+                {
+                    status && (
+                        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 max-w-lg w-full px-6 z-50">
+                            <div className="bg-slate-900 border border-slate-700 p-4 rounded-2xl shadow-2xl flex items-center gap-3">
+                                <AlertCircle className="text-teal-400 shrink-0" size={20} />
+                                <p className="text-xs font-mono text-slate-300 break-all">{status}</p>
+                            </div>
+                        </div>
+                    )
+                }
             </div>
-        </main>
+        </main >
     );
 }
 
